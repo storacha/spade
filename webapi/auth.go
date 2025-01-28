@@ -22,11 +22,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
-	"golang.org/x/xerrors"
 )
 
 const (
-	sigGraceEpochs = 3
+	sigGraceEpochs = 5 // 30 secs per epoch
 	authScheme     = `FIL-SPID-V0`
 )
 
@@ -271,22 +270,26 @@ func verifySig(ctx context.Context, challenge sigChallenge) (verifySigResult, er
 		var curChallengeTs *fil.LotusTS
 		var err error
 
-		// do it a few times because lotus is getting slower and slower to finalize 😭
+		// Do it a few times because lotus is getting slower and slower to finalize 😭
+		// Can't sleep too much though not to timeout the call
+		// spid.bash has been adjusted with a backoff to deal with this as well
 		for i := 0; i < 3; i++ {
 			curChallengeTs, err = lAPI.ChainGetTipSetByHeight(ctx, filabi.ChainEpoch(challenge.epoch), fil.LotusTSK{})
 			if err == nil {
 				break
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 
 		if err != nil {
-			return verifySigResult{}, xerrors.Errorf(
-				"unable to get tipset at height %d (%s): %w",
-				challenge.epoch,
-				fil.ClockMainnet.EpochToTime(filabi.ChainEpoch(challenge.epoch)),
-				err,
-			)
+			// do not make slow-chain a 500
+			return verifySigResult{
+				invalidSigErrstr: fmt.Sprintf(
+					"%s signature validation failed for auth header '%s': unable to get tipset at height %d (%s): %s",
+					authScheme, challenge.authHdr,
+					challenge.epoch, fil.ClockMainnet.EpochToTime(filabi.ChainEpoch(challenge.epoch)),
+					err,
+				)}, nil
 		}
 		bev := curChallengeTs.Blocks()[0].BeaconEntries[len(curChallengeTs.Blocks()[0].BeaconEntries)-1]
 		be = &bev
