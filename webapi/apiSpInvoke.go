@@ -382,16 +382,9 @@ func providerCollateralEstimateGiB(ctx context.Context, sourceEpoch filabi.Chain
 		return pc, nil
 	}
 
-	lapi := app.GetGlobalCtx(ctx).LotusAPI
-
-	ts, err := lapi.ChainGetTipSetByHeight(ctx, sourceEpoch, fil.LotusTSK{})
+	collateralGiB, err := app.EpochMinProviderCollateralEstimateGiB(ctx, sourceEpoch)
 	if err != nil {
-		return filbig.Zero(), cmn.WrErr(err)
-	}
-
-	collateralGiB, err := lapi.StateDealProviderCollateralBounds(ctx, filabi.PaddedPieceSize(1<<30), true, ts.Key())
-	if err != nil {
-		return filbig.Zero(), err
+		return collateralGiB, cmn.WrErr(err)
 	}
 
 	// make it 1.7 times larger, so that fluctuations in the state won't prevent the deal from being proposed/published later
@@ -399,7 +392,7 @@ func providerCollateralEstimateGiB(ctx context.Context, sourceEpoch filabi.Chain
 	// and https://github.com/filecoin-project/lotus/blob/v1.13.2-rc2/markets/storageadapter/provider.go#L41
 	inflatedCollateralGiB := filbig.Div(
 		filbig.Product(
-			collateralGiB.Min,
+			collateralGiB,
 			filbig.NewInt(17),
 		),
 		filbig.NewInt(10),

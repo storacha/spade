@@ -548,17 +548,20 @@ var trackDeals = &ufcli.Command{
 				Tipset: curTipset.Key(),
 			})
 
-			if _, err := tx.Exec(
+			if err := app.RefreshMatviews(ctx, tx); err != nil {
+				return cmn.WrErr(err)
+			}
+
+			// make sure this is last in the txn, so it doesn't clash too much with the collateral update
+			_, err := tx.Exec(
 				ctx,
 				`
 				UPDATE spd.global SET metadata = JSONB_SET( metadata, '{ market_state }', $1 )
 				`,
 				msJ,
-			); err != nil {
-				return cmn.WrErr(err)
-			}
+			)
 
-			return app.RefreshMatviews(ctx, tx)
+			return cmn.WrErr(err)
 		})
 	},
 }

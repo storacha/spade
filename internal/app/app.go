@@ -9,7 +9,9 @@ import (
 	"code.riba.cloud/go/toolbox/cmn"
 	"code.riba.cloud/go/toolbox/ufcli"
 	filabi "github.com/filecoin-project/go-state-types/abi"
+	filbig "github.com/filecoin-project/go-state-types/big"
 	filbuiltin "github.com/filecoin-project/go-state-types/builtin"
+	"github.com/georgysavva/scany/pgxscan"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 )
@@ -141,4 +143,45 @@ func RefreshMatviews(ctx context.Context, tx pgx.Tx) error {
 	}
 
 	return nil
+}
+
+func EpochMinProviderCollateralEstimateGiB(ctx context.Context, sourceEpoch filabi.ChainEpoch) (filabi.TokenAmount, error) {
+
+	gctx := GetGlobalCtx(ctx)
+
+	// check the DB and return if found
+	{
+		var collateralGiBStr []*int64
+		if err := pgxscan.Select(
+			ctx,
+			gctx.Db[DbMain],
+			&collateralGiBStr,
+			`SELECT (metadata->'legacy_f05_mincollateral'->>$1)::BIGINT FROM spd.global`,
+			sourceEpoch,
+		); err != nil {
+			return filbig.Zero(), cmn.WrErr(err)
+		}
+
+		if len(collateralGiBStr) != 0 && collateralGiBStr[0] != nil {
+			return filabi.NewTokenAmount(*collateralGiBStr[0]), nil
+		}
+	}
+
+	// not in DB - call out to the API, hopefully before public API history cutoff
+	ts, err := gctx.LotusAPI.ChainGetTipSetByHeight(ctx, sourceEpoch, fil.LotusTSK{})
+	if err != nil {
+		return filbig.Zero(), cmn.WrErr(err)
+	}
+
+	collateralGiB, err := gctx.LotusAPI.StateDealProviderCollateralBounds(
+		ctx,
+		filabi.PaddedPieceSize(1<<30), // 1 GiB
+		true,                          // fil+
+		ts.Key(),
+	)
+	if err != nil {
+		return filbig.Zero(), cmn.WrErr(err)
+	}
+
+	return collateralGiB.Min, nil
 }

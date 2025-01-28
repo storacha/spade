@@ -34,6 +34,7 @@ func main() {
 				signPending,
 				proposePending,
 				bulkPiecePoll,
+				updateCurrentF05CollateralEstimate,
 			},
 			Flags: app.CommonFlags,
 		},
