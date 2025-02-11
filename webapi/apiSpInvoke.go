@@ -331,9 +331,10 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 			ctx,
 			`
 			INSERT INTO spd.proposals
-				( piece_id, provider_id, client_id, start_epoch, end_epoch, proxied_log2_size, proposal_meta )
-			VALUES ( $1, $2, $3, $4, $5, $6, $7 )
+				( proposal_uuid, piece_id, provider_id, client_id, start_epoch, end_epoch, proxied_log2_size, proposal_meta )
+			VALUES ( $1, $2, $3, $4, $5, $6, $7, $8 )
 			`,
+			c.Request().Header.Get("X-SPADE-REQUEST-UUID"), // inherit the request uuid as the proposal uuid (a uuid is a uuid is a uuid)
 			chosenTenant.PieceID,
 			ctxMeta.authedActorID,
 			*chosenTenant.TenantClientID,
