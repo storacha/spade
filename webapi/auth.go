@@ -54,8 +54,6 @@ var (
 			`([0-9]+)` + `\s*;\s*` +
 			// spID
 			`([ft]0[0-9]+)` + `\s*;\s*` +
-			// legacy crap, remove once contract signing in place for everyone
-			`(?:\s*2\s*;)?` +
 			// signature
 			`([^; ]+)` +
 			// optional signed argument
@@ -184,7 +182,7 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 			RETURNING
 				request_uuid,
 				( SELECT ( metadata->'market_state'->'epoch' )::INTEGER FROM spd.global ),
-				(
+				COALESCE(	(
 					SELECT
 						ARRAY[
 							COALESCE( org_id, -1 ),
@@ -194,7 +192,8 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 						]
 					FROM spd.providers
 					WHERE provider_id = $1
-				),
+					LIMIT 1
+				), ARRAY[-1, -1, -1, -1] ),
 				(
 					SELECT info
 						FROM spd.providers_info
