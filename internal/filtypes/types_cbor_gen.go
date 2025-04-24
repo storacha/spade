@@ -159,21 +159,24 @@ func (t *StorageProposalV12xParams) UnmarshalCBOR(r io.Reader) (err error) {
 		return fmt.Errorf("StorageProposalV12xParams: map struct too large (%d)", extra)
 	}
 
-	var name string
 	n := extra
 
+	nameBuf := make([]byte, 18)
 	for i := uint64(0); i < n; i++ {
-
-		{
-			sval, err := cbg.ReadStringWithMax(cr, 8192)
-			if err != nil {
-				return err
-			}
-
-			name = string(sval)
+		nameLen, ok, err := cbg.ReadFullStringIntoBuf(cr, nameBuf, 8192)
+		if err != nil {
+			return err
 		}
 
-		switch name {
+		if !ok {
+			// Field doesn't exist on this type, so ignore it
+			if err := cbg.ScanForLinks(cr, func(cid.Cid) {}); err != nil {
+				return err
+			}
+			continue
+		}
+
+		switch string(nameBuf[:nameLen]) {
 		// t.DealUUID (uuid.UUID) (array)
 		case "DealUUID":
 
@@ -276,7 +279,9 @@ func (t *StorageProposalV12xParams) UnmarshalCBOR(r io.Reader) (err error) {
 
 		default:
 			// Field doesn't exist on this type, so ignore it
-			cbg.ScanForLinks(r, func(cid.Cid) {})
+			if err := cbg.ScanForLinks(r, func(cid.Cid) {}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -358,21 +363,24 @@ func (t *StorageProposalV120Response) UnmarshalCBOR(r io.Reader) (err error) {
 		return fmt.Errorf("StorageProposalV120Response: map struct too large (%d)", extra)
 	}
 
-	var name string
 	n := extra
 
+	nameBuf := make([]byte, 8)
 	for i := uint64(0); i < n; i++ {
-
-		{
-			sval, err := cbg.ReadStringWithMax(cr, 8192)
-			if err != nil {
-				return err
-			}
-
-			name = string(sval)
+		nameLen, ok, err := cbg.ReadFullStringIntoBuf(cr, nameBuf, 8192)
+		if err != nil {
+			return err
 		}
 
-		switch name {
+		if !ok {
+			// Field doesn't exist on this type, so ignore it
+			if err := cbg.ScanForLinks(cr, func(cid.Cid) {}); err != nil {
+				return err
+			}
+			continue
+		}
+
+		switch string(nameBuf[:nameLen]) {
 		// t.Message (string) (string)
 		case "Message":
 
@@ -405,7 +413,9 @@ func (t *StorageProposalV120Response) UnmarshalCBOR(r io.Reader) (err error) {
 
 		default:
 			// Field doesn't exist on this type, so ignore it
-			cbg.ScanForLinks(r, func(cid.Cid) {})
+			if err := cbg.ScanForLinks(r, func(cid.Cid) {}); err != nil {
+				return err
+			}
 		}
 	}
 
