@@ -22,7 +22,8 @@ It is also likely this functionality will be soon included in Fil implementation
 ### SP Dealmaking
 
 Workflow has **changed substantially**. This entry will be updated when the final API solidifies in the coming few days.
-In the meantime join us in [#spade-sp over at the Fil Slack], while we clean up the dust 🤩
+In the meantime join us in our [Discord Server] and [#spade-sp over at the Fil Slack], while we clean up the dust 🤩
 
 [API]: https://raw.githubusercontent.com/storacha/spade/master/webapi/routes.go
 [#spade-sp over at the Fil Slack]: https://filecoinproject.slack.com/archives/C0377FJCG1L
+[Discord Server]: https://discord.gg/Ppy2HZU529
