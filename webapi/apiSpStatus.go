@@ -12,9 +12,8 @@ func apiSpStatus(c echo.Context) error {
 		c,
 		apitypes.ErrSystemTemporarilyDisabled,
 		`
-                                            !!! WE NEVER IMPLEMENTED THIS !!!
-
-This area will contain various information regarding the system and the current state of Storage Provider %s
+		Auth successful, your SP is authorized for Spade and your signature is valid.
+		Storage Provider: %s
     `,
 		ctxMeta.authedActorID.String(),
 	)
