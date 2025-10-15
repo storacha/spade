@@ -1,6 +1,6 @@
 .PHONY: $(MAKECMDGOALS)
 
-build: webapi cron
+build: webapi cron tool
 
 mkbin:
 	@mkdir -p bin/
@@ -13,6 +13,9 @@ genapitypes:
 
 cron: mkbin genfiltypes
 	go build -o bin/spade-cron ./cron
+
+tool: mkbin gentypes
+	go build -o bin/spade-tool ./tool
 
 gentypes: genfiltypes genapitypes
 
