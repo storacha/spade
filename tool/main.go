@@ -39,6 +39,7 @@ func main() {
 			Commands: []*ufcli.Command{
 				pieceManifestCmd,
 			},
+			Flags: app.CommonFlags,
 		},
 		GlobalInit: app.GlobalInit,
 	}).RunAndExit(context.Background())
