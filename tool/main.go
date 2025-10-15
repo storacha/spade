@@ -15,14 +15,7 @@ func main() {
 
 	cmdName := app.AppName + "-tool"
 	log := logging.Logger(fmt.Sprintf("%s(%d)", cmdName, os.Getpid()))
-
-	// *always* log json
-	{
-		lcfg := logging.GetConfig()
-		lcfg.Format = logging.JSONOutput
-		logging.SetupLogging(lcfg)
-		logging.SetLogLevel("*", "INFO")
-	}
+	logging.SetLogLevel("*", "INFO")
 
 	home, err := os.UserHomeDir()
 	if err != nil {
