@@ -10,7 +10,6 @@ import (
 
 	infomempeerstore "code.riba.cloud/go/libp2p-infomempeerstore"
 	"code.riba.cloud/go/toolbox-interplanetary/fil"
-	"code.riba.cloud/go/toolbox-interplanetary/lp2p"
 	"code.riba.cloud/go/toolbox/cmn"
 	"code.riba.cloud/go/toolbox/ufcli"
 	filaddr "github.com/filecoin-project/go-address"
@@ -18,6 +17,7 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"github.com/storacha/spade/internal/app"
 	"github.com/storacha/spade/internal/filtypes"
+	"github.com/storacha/spade/internal/lp2p"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -218,7 +218,7 @@ func getSPInfo(ctx context.Context, sp filaddr.Address, timeOut time.Duration) (
 		return spi, nil
 	}
 
-	nodeHost, peerStore, err := lp2p.NewPlainNodeTCP(timeOut)
+	nodeHost, peerStore, err := lp2p.NewPlainNode(timeOut)
 	if err != nil {
 		return spInfo{}, cmn.WrErr(err)
 	}
