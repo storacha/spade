@@ -8,13 +8,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"code.riba.cloud/go/toolbox-interplanetary/lp2p"
 	"code.riba.cloud/go/toolbox/cmn"
 	"code.riba.cloud/go/toolbox/ufcli"
 	"github.com/georgysavva/scany/pgxscan"
 	"github.com/google/uuid"
 	"github.com/storacha/spade/internal/app"
 	"github.com/storacha/spade/internal/filtypes"
+	"github.com/storacha/spade/internal/lp2p"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/xerrors"
 
@@ -140,7 +140,7 @@ var proposePending = &ufcli.Command{
 		}
 		tot.uniqueProviders = len(props)
 
-		nodeHost, _, err := lp2p.NewPlainNodeTCP(time.Duration(proposalTimeout) * time.Second)
+		nodeHost, _, err := lp2p.NewPlainNode(time.Duration(proposalTimeout) * time.Second)
 		if err != nil {
 			return cmn.WrErr(err)
 		}
