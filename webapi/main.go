@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func setup() *echo.Echo {
+func setup(ctx context.Context) *echo.Echo {
 	//
 	// Server setup
 	e := echo.New()
@@ -34,8 +34,13 @@ func setup() *echo.Echo {
 		},
 	))
 
+	// [app.GlobalInit] will have run by this point so main DB should be available
+	// on context.
+	_, _, db, _ := app.UnpackCtx(ctx)
+	service := NewPgService(db)
+
 	// routes
-	registerRoutes(e)
+	registerRoutes(e, service)
 
 	//
 	// Housekeeping
@@ -93,7 +98,7 @@ func main() {
 				// we will still catch the failure-to-write either way
 				signal.Ignore(unix.SIGPIPE)
 
-				e = setup()
+				e = setup(cctx.Context)
 				e.Server.BaseContext = func(net.Listener) context.Context { return cctx.Context }
 				return e.Start(cctx.String("webapi-listen-address"))
 			},

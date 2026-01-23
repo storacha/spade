@@ -4,7 +4,7 @@ import "github.com/labstack/echo/v4"
 
 // This lists in one place all recognized routes & parameters
 // FIXME - we should make an openapi or something for this...
-func registerRoutes(e *echo.Echo) {
+func registerRoutes(e *echo.Echo, service Service) {
 	spRoutes := e.Group("/sp", spidAuth)
 
 	//
@@ -31,14 +31,14 @@ func registerRoutes(e *echo.Echo) {
 	// - include-sourceless = <boolean>
 	//   When true the result includes eligible pieces without any known sources. Such pieces are omitted by default.
 	//
-	spRoutes.GET("/eligible_pieces", apiSpListEligible)
+	spRoutes.GET("/eligible_pieces", NewSpListEligibleHandler(service))
 
 	//
 	// /pending_proposals produces a list of current outstanding reservations, recent errors and various statistics.
 	//
 	// Recognized parameters: none
 	//
-	spRoutes.GET("/pending_proposals", apiSpListPendingProposals)
+	spRoutes.GET("/pending_proposals", NewSpListPendingProposalsHandler(service))
 
 	//
 	// /piece_manifest produces a manifest for a segmented piece. You need a reservation proposal UUID to call this.
