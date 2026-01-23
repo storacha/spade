@@ -3,7 +3,6 @@ package main
 import "github.com/labstack/echo/v4"
 
 // This lists in one place all recognized routes & parameters
-// FIXME - we should make an openapi or something for this...
 func registerRoutes(e *echo.Echo) {
 	spRoutes := e.Group("/sp", spidAuth)
 
