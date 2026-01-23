@@ -14,79 +14,83 @@ import (
 
 func NewSpListEligibleHandler(service Service) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		ctx, ctxMeta := unpackAuthedEchoContext(c)
-
-		lim := uint64(listEligibleDefaultSize)
-		if c.QueryParams().Has("limit") {
-			var err error
-			lim, err = parseUIntQueryParam(c, "limit", 1, listEligibleMaxSize)
-			if err != nil {
-				return retFail(c, apitypes.ErrInvalidRequest, err.Error())
-			}
-		}
-
-		tenantID := int16(0) // 0 == any
-		if c.QueryParams().Has("tenant") {
-			tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
-			if err != nil {
-				return retFail(c, apitypes.ErrInvalidRequest, err.Error())
-			}
-			tenantID = int16(tid)
-		}
-
-		pieces, more, err := service.EligiblePieces(
-			ctx,
-			ctxMeta.authedActorID,
-			WithEligiblePiecesLimit(lim),
-			WithEligiblePiecesTenantID(tenantID),
-			WithEligiblePiecesIncludeSourceless(
-				truthyBoolQueryParam(c, "include-sourceless"),
-			),
-		)
-		if err != nil {
-			return cmn.WrErr(err)
-		}
-
-		info := []string{
-			`List of qualifying Piece CIDs.`,
-			``,
-			`Once you have selected a Piece CID - reserve it in the system by invoking the API as`,
-			"shown in the corresponding `sample_reserve_cmd`. Within 5 minutes the reservation",
-			`will activate and you will be able to see it and potential unlocked sources at:`,
-			" " + curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/pending_proposals", nil),
-		}
-
-		// we got more than requested - indicate that this set is large
-		if more {
-			exLim := lim
-			if exLim < listEligibleDefaultSize {
-				exLim = listEligibleDefaultSize
-			}
-
-			info = append(
-				[]string{
-					fmt.Sprintf(`NOTE: The complete list of entries has been TRUNCATED to the top %d.`, lim),
-					"Use the 'limit' param in your API call to request more of the (possibly very large) list:",
-					" " + curlAuthedForSP(c, ctxMeta.authedActorID, fmt.Sprintf("%s?limit=%d", c.Request().URL.Path, (2*exLim)/100*100), nil),
-					"",
-				},
-				info...,
-			)
-		}
-
-		ret := make(apitypes.ResponsePiecesEligible, len(pieces))
-		for i, p := range pieces {
-			sa := make(url.Values, 2)
-			sa.Add("call", "reserve_piece")
-			sa.Add("piece_cid", p.PieceCid)
-			sa.Add("tenant_policy", app.TEMPPolicies[p.Tenants[0]])
-			p.PaddedPieceSize = 1 << p.PieceLog2Size
-			p.SampleReserveCmd = curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/invoke", sa)
-			p.ClaimingTenant = p.Tenants[0]
-			p.TenantPolicyCid = app.TEMPPolicies[p.Tenants[0]]
-			ret[i] = &p.Piece
-		}
-
-		return retPayloadAnnotated(c, http.StatusOK, 0, ret, strings.Join(info, "\n"))
+		return apiSpListEligible(c, service)
 	}
+}
+
+func apiSpListEligible(c echo.Context, service Service) error {
+	ctx, ctxMeta := unpackAuthedEchoContext(c)
+
+	lim := uint64(listEligibleDefaultSize)
+	if c.QueryParams().Has("limit") {
+		var err error
+		lim, err = parseUIntQueryParam(c, "limit", 1, listEligibleMaxSize)
+		if err != nil {
+			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+		}
+	}
+
+	tenantID := int16(0) // 0 == any
+	if c.QueryParams().Has("tenant") {
+		tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
+		if err != nil {
+			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+		}
+		tenantID = int16(tid)
+	}
+
+	pieces, more, err := service.EligiblePieces(
+		ctx,
+		ctxMeta.authedActorID,
+		WithEligiblePiecesLimit(lim),
+		WithEligiblePiecesTenantID(tenantID),
+		WithEligiblePiecesIncludeSourceless(
+			truthyBoolQueryParam(c, "include-sourceless"),
+		),
+	)
+	if err != nil {
+		return cmn.WrErr(err)
+	}
+
+	info := []string{
+		`List of qualifying Piece CIDs.`,
+		``,
+		`Once you have selected a Piece CID - reserve it in the system by invoking the API as`,
+		"shown in the corresponding `sample_reserve_cmd`. Within 5 minutes the reservation",
+		`will activate and you will be able to see it and potential unlocked sources at:`,
+		" " + curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/pending_proposals", nil),
+	}
+
+	// we got more than requested - indicate that this set is large
+	if more {
+		exLim := lim
+		if exLim < listEligibleDefaultSize {
+			exLim = listEligibleDefaultSize
+		}
+
+		info = append(
+			[]string{
+				fmt.Sprintf(`NOTE: The complete list of entries has been TRUNCATED to the top %d.`, lim),
+				"Use the 'limit' param in your API call to request more of the (possibly very large) list:",
+				" " + curlAuthedForSP(c, ctxMeta.authedActorID, fmt.Sprintf("%s?limit=%d", c.Request().URL.Path, (2*exLim)/100*100), nil),
+				"",
+			},
+			info...,
+		)
+	}
+
+	ret := make(apitypes.ResponsePiecesEligible, len(pieces))
+	for i, p := range pieces {
+		sa := make(url.Values, 2)
+		sa.Add("call", "reserve_piece")
+		sa.Add("piece_cid", p.PieceCid)
+		sa.Add("tenant_policy", app.TEMPPolicies[p.Tenants[0]])
+		p.PaddedPieceSize = 1 << p.PieceLog2Size
+		p.SampleReserveCmd = curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/invoke", sa)
+		p.ClaimingTenant = p.Tenants[0]
+		p.TenantPolicyCid = app.TEMPPolicies[p.Tenants[0]]
+		ret[i] = &p.Piece
+	}
+
+	return retPayloadAnnotated(c, http.StatusOK, 0, ret, strings.Join(info, "\n"))
 }
