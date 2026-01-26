@@ -10,21 +10,22 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
 )
 
-func NewSpListEligibleHandler(service Service) echo.HandlerFunc {
+func NewSpListEligibleHandler(svc service.EligibilityService) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		return apiSpListEligible(c, service)
+		return apiSpListEligible(c, svc)
 	}
 }
 
-func apiSpListEligible(c echo.Context, service Service) error {
+func apiSpListEligible(c echo.Context, svc service.EligibilityService) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
-	lim := uint64(listEligibleDefaultSize)
+	lim := uint64(service.ListEligibleDefaultSize)
 	if c.QueryParams().Has("limit") {
 		var err error
-		lim, err = parseUIntQueryParam(c, "limit", 1, listEligibleMaxSize)
+		lim, err = parseUIntQueryParam(c, "limit", 1, service.ListEligibleMaxSize)
 		if err != nil {
 			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
 		}
@@ -39,12 +40,12 @@ func apiSpListEligible(c echo.Context, service Service) error {
 		tenantID = int16(tid)
 	}
 
-	pieces, more, err := service.EligiblePieces(
+	pieces, more, err := svc.EligiblePieces(
 		ctx,
 		ctxMeta.authedActorID,
-		WithEligiblePiecesLimit(lim),
-		WithEligiblePiecesTenantID(tenantID),
-		WithEligiblePiecesIncludeSourceless(
+		service.WithEligiblePiecesLimit(lim),
+		service.WithEligiblePiecesTenantID(tenantID),
+		service.WithEligiblePiecesIncludeSourceless(
 			truthyBoolQueryParam(c, "include-sourceless"),
 		),
 	)
@@ -64,8 +65,8 @@ func apiSpListEligible(c echo.Context, service Service) error {
 	// we got more than requested - indicate that this set is large
 	if more {
 		exLim := lim
-		if exLim < listEligibleDefaultSize {
-			exLim = listEligibleDefaultSize
+		if exLim < service.ListEligibleDefaultSize {
+			exLim = service.ListEligibleDefaultSize
 		}
 
 		info = append(

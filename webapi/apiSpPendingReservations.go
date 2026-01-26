@@ -11,18 +11,19 @@ import (
 	filabi "github.com/filecoin-project/go-state-types/abi"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
+	"github.com/storacha/spade/service"
 )
 
-func NewSpListPendingProposalsHandler(service Service) echo.HandlerFunc {
+func NewSpListPendingProposalsHandler(svc service.ProposalService) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		return apiSpListPendingProposals(c, service)
+		return apiSpListPendingProposals(c, svc)
 	}
 }
 
-func apiSpListPendingProposals(c echo.Context, service Service) error {
+func apiSpListPendingProposals(c echo.Context, svc service.ProposalService) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
-	pending, err := service.PendingProposals(
+	pending, err := svc.PendingProposals(
 		ctx,
 		ctxMeta.authedActorID,
 	)
@@ -109,7 +110,7 @@ func apiSpListPendingProposals(c echo.Context, service Service) error {
 	)
 
 	if len(fails) > 0 {
-		msg += fmt.Sprintf("\n\nIn the past %dh there were %d proposal errors, shown in recent_failures below.", showRecentFailuresHours, len(fails))
+		msg += fmt.Sprintf("\n\nIn the past %dh there were %d proposal errors, shown in recent_failures below.", service.ShowRecentFailuresHours, len(fails))
 
 		ret.RecentFailures = make([]apitypes.ProposalFailure, 0, len(fails))
 		for _, f := range fails {

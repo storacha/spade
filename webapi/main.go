@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service/pg"
 	"golang.org/x/sys/unix"
 )
 
@@ -36,11 +37,11 @@ func setup(ctx context.Context) *echo.Echo {
 
 	// [app.GlobalInit] will have run by this point so main DB should be available
 	// on context.
-	_, _, db, _ := app.UnpackCtx(ctx)
-	service := NewPgService(db)
+	_, _, db, gCtx := app.UnpackCtx(ctx)
+	svc := pg.New(db, gCtx.LotusAPI)
 
 	// routes
-	registerRoutes(e, service)
+	registerRoutes(e, svc)
 
 	//
 	// Housekeeping

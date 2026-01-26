@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -17,11 +15,13 @@ import (
 	filaddr "github.com/filecoin-project/go-address"
 	filabi "github.com/filecoin-project/go-state-types/abi"
 	filprovider "github.com/filecoin-project/go-state-types/builtin/v9/miner"
+	"github.com/google/uuid"
 	lru "github.com/hashicorp/golang-lru/v2"
 	blsgo "github.com/jsign/go-filsigner/bls"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
 )
 
 const (
@@ -64,7 +64,13 @@ var (
 	beaconCache, _    = lru.New[int64, *fil.LotusBeaconEntry](sigGraceEpochs * 4)
 )
 
-func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
+func NewSpIDAuthMiddleware(svc service.RequestService) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return spidAuth(next, svc)
+	}
+}
+
+func spidAuth(next echo.HandlerFunc, svc service.RequestService) echo.HandlerFunc {
 	return func(c echo.Context) error {
 
 		ctx, log, _, _ := app.UnpackCtx(c.Request().Context())
@@ -148,86 +154,36 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 			delete(reqCopy.Header, strip)
 		}
 
-		reqJ, err := json.Marshal(
-			struct {
-				Method       string
-				Host         string
-				Path         string
-				Params       string
-				ParamsSigned url.Values
-				Headers      http.Header
-			}{
-				Method:       reqCopy.Method,
-				Host:         reqCopy.Host,
-				Path:         reqCopy.URL.Path,
-				Params:       reqCopy.URL.Query().Encode(),
-				ParamsSigned: signedArgs,
-				Headers:      reqCopy.Header,
-			},
-		)
+		reqState, err := svc.Request(ctx, spID, service.Request{
+			Method:       reqCopy.Method,
+			Host:         reqCopy.Host,
+			Path:         reqCopy.URL.Path,
+			Params:       reqCopy.URL.Query(),
+			ParamsSigned: signedArgs,
+			Headers:      reqCopy.Header,
+		})
 		if err != nil {
-			return cmn.WrErr(err)
-		}
-
-		spDetails := [4]int16{-1, -1, -1, -1}
-		var requestUUID string
-		var stateEpoch int64
-		var spInfo apitypes.SPInfo
-		var spInfoLastPoll *time.Time
-		if err := app.GetGlobalCtx(ctx).Db[app.DbMain].QueryRow(
-			ctx,
-			`
-			INSERT INTO spd.requests ( provider_id, request_dump )
-				VALUES ( $1, $2 )
-			RETURNING
-				request_uuid,
-				( SELECT ( metadata->'market_state'->'epoch' )::INTEGER FROM spd.global ),
-				COALESCE(	(
-					SELECT
-						ARRAY[
-							COALESCE( org_id, -1 ),
-							COALESCE( city_id, -1),
-							COALESCE( country_id, -1),
-							COALESCE( continent_id, -1)
-						]
-					FROM spd.providers
-					WHERE provider_id = $1
-					LIMIT 1
-				), ARRAY[-1, -1, -1, -1] ),
-				(
-					SELECT info
-						FROM spd.providers_info
-					WHERE provider_id = $1
-				),
-				(
-					SELECT provider_last_polled
-						FROM spd.providers_info
-					WHERE provider_id = $1
-				)
-			`,
-			spID,
-			reqJ,
-		).Scan(&requestUUID, &stateEpoch, &spDetails, &spInfo, &spInfoLastPoll); err != nil {
 			return cmn.WrErr(err)
 		}
 
 		c.Response().Header().Set("X-SPADE-FIL-SPID", challenge.addr.String())
 
 		// set on both request (for logging ) and response object
-		c.Request().Header.Set("X-SPADE-REQUEST-UUID", requestUUID)
-		c.Response().Header().Set("X-SPADE-REQUEST-UUID", requestUUID)
+		c.Request().Header.Set("X-SPADE-REQUEST-UUID", reqState.RequestID.String())
+		c.Response().Header().Set("X-SPADE-REQUEST-UUID", reqState.RequestID.String())
 
 		c.Set("♠️", metaContext{
 			GlobalContext:    app.GetGlobalCtx(ctx),
-			stateEpoch:       stateEpoch,
+			requestID:        reqState.RequestID,
+			stateEpoch:       reqState.StateEpoch,
 			authedActorID:    spID,
 			signedArgs:       signedArgs,
-			spOrgID:          spDetails[0],
-			spCityID:         spDetails[1],
-			spCountryID:      spDetails[2],
-			spContinentID:    spDetails[3],
-			spInfo:           spInfo,
-			spInfoLastPolled: spInfoLastPoll,
+			spOrgID:          reqState.ProviderDetails[0],
+			spCityID:         reqState.ProviderDetails[1],
+			spCountryID:      reqState.ProviderDetails[2],
+			spContinentID:    reqState.ProviderDetails[3],
+			spInfo:           reqState.ProviderInfo,
+			spInfoLastPolled: reqState.LastPoll,
 		})
 
 		return next(c)
@@ -236,6 +192,7 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 
 type metaContext struct {
 	app.GlobalContext
+	requestID        uuid.UUID
 	authedActorID    fil.ActorID
 	stateEpoch       int64
 	spInfo           apitypes.SPInfo
