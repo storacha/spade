@@ -12,9 +12,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/service"
+	"github.com/storacha/spade/spid"
 )
 
-func (p *PgSpadeService) Request(ctx context.Context, sp fil.ActorID, req service.Request) (service.RequestState, error) {
+func (p *PgSpadeService) Authorize(ctx context.Context, req service.Request) (service.Authorization, error) {
+	challenge, err := spid.Parse(req.Headers.Get("Authorization"))
+	if err != nil {
+		return service.Authorization{}, fmt.Errorf("parsing authorization header: %w", err)
+	}
+
+	err = spid.Verify(ctx, p.filClient, challenge)
+	if err != nil {
+		return service.Authorization{}, fmt.Errorf("verifying authorization signature: %w", err)
+	}
+
+	sp := fil.MustParseActorString(challenge.Addr().String())
+
 	reqJ, err := json.Marshal(
 		struct {
 			Method       string
@@ -28,12 +41,12 @@ func (p *PgSpadeService) Request(ctx context.Context, sp fil.ActorID, req servic
 			Host:         req.Host,
 			Path:         req.Path,
 			Params:       req.Params.Encode(),
-			ParamsSigned: req.ParamsSigned,
+			ParamsSigned: challenge.SignedArgs(),
 			Headers:      req.Headers,
 		},
 	)
 	if err != nil {
-		return service.RequestState{}, err
+		return service.Authorization{}, err
 	}
 
 	spDetails := [4]int16{-1, -1, -1, -1}
@@ -75,17 +88,19 @@ func (p *PgSpadeService) Request(ctx context.Context, sp fil.ActorID, req servic
 		sp,
 		reqJ,
 	).Scan(&requestUUID, &stateEpoch, &spDetails, &spInfo, &spInfoLastPoll); err != nil {
-		return service.RequestState{}, err
+		return service.Authorization{}, err
 	}
 
 	reqID, err := uuid.Parse(requestUUID)
 	if err != nil {
-		return service.RequestState{}, fmt.Errorf("parsing UUID: %w", err)
+		return service.Authorization{}, fmt.Errorf("parsing UUID: %w", err)
 	}
 
-	return service.RequestState{
+	return service.Authorization{
 		RequestID:       reqID,
 		StateEpoch:      stateEpoch,
+		SignedArgs:      challenge.SignedArgs(),
+		ProviderID:      sp,
 		ProviderDetails: spDetails,
 		ProviderInfo:    spInfo,
 		LastPoll:        spInfoLastPoll,

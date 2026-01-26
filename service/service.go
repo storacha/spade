@@ -113,27 +113,27 @@ type PieceManifest struct {
 }
 
 type Request struct {
-	Method       string
-	Host         string
-	Path         string
-	Params       url.Values
-	ParamsSigned url.Values
-	Headers      http.Header
+	Method  string
+	Host    string
+	Path    string
+	Params  url.Values
+	Headers http.Header
 }
 
-type RequestState struct {
+type Authorization struct {
 	RequestID       uuid.UUID
+	SignedArgs      url.Values
 	StateEpoch      int64
+	ProviderID      fil.ActorID
 	ProviderDetails [4]int16
 	ProviderInfo    apitypes.SPInfo
 	LastPoll        *time.Time
 }
 
-type RequestService interface {
-	// Request records a signed API request from a storage provider and returns
-	// the assigned request UUID, current market state epoch, SP info and last
-	// poll time.
-	Request(ctx context.Context, storageProvider fil.ActorID, req Request) (RequestState, error)
+type AuthorizationService interface {
+	// Authorize validates and verifies a request's SPID challenge and returns
+	// authorization details.
+	Authorize(ctx context.Context, req Request) (Authorization, error)
 }
 
 type EligibilityService interface {
@@ -164,7 +164,7 @@ type ReservationService interface {
 
 // SpadeService defines the core business logic of the Spade SP API.
 type SpadeService interface {
-	RequestService
+	AuthorizationService
 	EligibilityService
 	ProposalService
 	PieceManifestService

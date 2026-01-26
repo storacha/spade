@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/spid"
 	"golang.org/x/xerrors"
 )
 
@@ -157,7 +158,7 @@ func retFail(c echo.Context, errCode apitypes.APIErrorCode, fMsg string, args ..
 }
 
 func retAuthFail(c echo.Context, f string, args ...interface{}) error {
-	c.Response().Header().Set(echo.HeaderWWWAuthenticate, authScheme)
+	c.Response().Header().Set(echo.HeaderWWWAuthenticate, spid.Scheme)
 	return retPayloadAnnotated(
 		c,
 		http.StatusUnauthorized,

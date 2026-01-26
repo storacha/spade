@@ -294,14 +294,13 @@ func spIneligibleErr(ctx context.Context, db PgClient, filClient service.Reserva
 	defer func() {
 		if defErr != nil {
 			providerEligibleCache.Del(uint64(spID))
-			defIneligibleCode = 0
 		} else {
-			providerEligibleCache.SetWithTTL(uint64(spID), defErr, 1, time.Minute)
+			providerEligibleCache.SetWithTTL(uint64(spID), true, 1, time.Minute)
 		}
 	}()
 
-	if protoReason, found := providerEligibleCache.Get(uint64(spID)); found {
-		return protoReason.(error)
+	if _, found := providerEligibleCache.Get(uint64(spID)); found {
+		return nil
 	}
 
 	curTipset, err := service.GetTipset(ctx, filClient, lookback)
