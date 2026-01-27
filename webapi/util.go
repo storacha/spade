@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,7 +13,7 @@ import (
 	"code.riba.cloud/go/toolbox/cmn"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
-	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
 	"github.com/storacha/spade/spid"
 	"golang.org/x/xerrors"
 )
@@ -42,7 +41,7 @@ func parseUIntQueryParam(c echo.Context, pname string, min, max uint64) (uint64,
 	return val, nil
 }
 
-func retPayloadAnnotated(c echo.Context, httpCode int, errCode apitypes.APIErrorCode, payload apitypes.ResponsePayload, fmsg string, args ...interface{}) error {
+func retPayloadAnnotated(c echo.Context, log service.ErrorLogger, httpCode int, errCode apitypes.APIErrorCode, payload apitypes.ResponsePayload, fmsg string, args ...interface{}) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
 	msg := fmt.Sprintf(fmsg, args...)
@@ -91,29 +90,8 @@ func retPayloadAnnotated(c echo.Context, httpCode int, errCode apitypes.APIError
 		c.Request().Header.Set("X-SPADE-FAILURE-SLUG", r.ErrSlug) // set on *request* so that echo can log it
 
 		if r.RequestID != "" && (msg != "" || errCode != 0) {
-			jPayload, err := json.Marshal(payload)
+			err := log.RequestError(ctx, ctxMeta.requestID, errCode, msg, payload)
 			if err != nil {
-				return cmn.WrErr(err)
-			}
-			if _, err := ctxMeta.Db[app.DbMain].Exec(
-				ctx,
-				`
-				UPDATE spd.requests SET
-					request_meta = JSONB_STRIP_NULLS( request_meta || JSONB_BUILD_OBJECT(
-						'error', $1::TEXT,
-						'error_code', $2::INTEGER,
-						'error_slug', $3::TEXT,
-						'payload', $4::JSONB
-					) )
-				WHERE
-					request_uuid = $5
-				`,
-				msg,
-				r.ErrCode,
-				r.ErrSlug,
-				jPayload,
-				r.RequestID,
-			); err != nil {
 				return cmn.WrErr(err)
 			}
 		}
@@ -147,9 +125,10 @@ func curlAuthedForSP(c echo.Context, spID fil.ActorID, path string, sigArgs url.
 	)
 }
 
-func retFail(c echo.Context, errCode apitypes.APIErrorCode, fMsg string, args ...interface{}) error {
+func retFail(c echo.Context, log service.ErrorLogger, errCode apitypes.APIErrorCode, fMsg string, args ...interface{}) error {
 	return retPayloadAnnotated(
 		c,
+		log,
 		http.StatusForbidden, // DO NOT use 400: we rewrite that on the nginx level to normalize a class of transport errors
 		errCode,
 		nil,
@@ -157,10 +136,11 @@ func retFail(c echo.Context, errCode apitypes.APIErrorCode, fMsg string, args ..
 	)
 }
 
-func retAuthFail(c echo.Context, f string, args ...interface{}) error {
+func retAuthFail(c echo.Context, log service.ErrorLogger, f string, args ...interface{}) error {
 	c.Response().Header().Set(echo.HeaderWWWAuthenticate, spid.Scheme)
 	return retPayloadAnnotated(
 		c,
+		log,
 		http.StatusUnauthorized,
 		apitypes.ErrUnauthorizedAccess,
 		nil,
@@ -169,9 +149,10 @@ func retAuthFail(c echo.Context, f string, args ...interface{}) error {
 	)
 }
 
-func retInvalidRoute(c echo.Context) error {
+func retInvalidRoute(c echo.Context, log service.ErrorLogger) error {
 	return retFail(
 		c,
+		log,
 		apitypes.ErrInvalidRequest,
 		"invalid route request: %s %s",
 		c.Request().Method,

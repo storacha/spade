@@ -30,6 +30,7 @@ func apiSpPieceManifest(c echo.Context, svc service.PieceManifestService) error 
 	if ps == "" {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"A `proposal` UUID parameter must be supplied to this call",
 		)
@@ -38,6 +39,7 @@ func apiSpPieceManifest(c echo.Context, svc service.PieceManifestService) error 
 	if err != nil {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"The supplied `proposal` parameter '%s' is not a valid UUID: %s",
 			ps,
@@ -50,6 +52,7 @@ func apiSpPieceManifest(c echo.Context, svc service.PieceManifestService) error 
 		if errors.Is(err, service.ErrManifestNotFound) {
 			return retFail(
 				c,
+				svc,
 				apitypes.ErrInvalidRequest,
 				"no results for proposal UUID '%s': either it does not exist, is too recent, does not belong to %s or is not segmented",
 				ps,
@@ -84,6 +87,7 @@ func apiSpPieceManifest(c echo.Context, svc service.PieceManifestService) error 
 
 	return retPayloadAnnotated(
 		c,
+		svc,
 		http.StatusOK,
 		0,
 		resp,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/georgysavva/scany/pgxscan"
+	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/storacha/spade/internal/app"
 	"github.com/storacha/spade/service"
@@ -11,8 +12,9 @@ import (
 
 type PgClient interface {
 	pgxscan.Querier
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 	BeginFunc(ctx context.Context, f func(pgx.Tx) error) error
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type PgLotusSpadeService struct {

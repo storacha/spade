@@ -123,6 +123,7 @@ func apiSpListPendingProposals(c echo.Context, svc service.ProposalService) erro
 
 	return retPayloadAnnotated(
 		c,
+		svc,
 		http.StatusOK,
 		0,
 		ret,

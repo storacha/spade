@@ -15,7 +15,7 @@ func registerRoutes(e *echo.Echo, svc service.SpadeService) {
 	//
 	// Recognized parameters: none
 	//
-	spRoutes.GET("/status", apiSpStatus)
+	spRoutes.GET("/status", NewSpStatusHandler(svc))
 
 	//
 	// /eligible_pieces produces a listing of PieceCIDs that a storage provider is eligible to receive a deal for.
@@ -62,5 +62,7 @@ func registerRoutes(e *echo.Echo, svc service.SpadeService) {
 	//
 	//
 	spRoutes.POST("/invoke", NewSpInvokeHandler(svc))
-	spRoutes.GET("/invoke", retInvalidRoute)
+	spRoutes.GET("/invoke", func(c echo.Context) error {
+		return retInvalidRoute(c, svc)
+	})
 }

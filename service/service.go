@@ -69,7 +69,7 @@ type ReservePieceConfig struct {
 	RequestID    uuid.UUID
 }
 
-// WithReservePieceTenantID sets an optional tenant ID the pirce should be
+// WithReservePieceTenantID sets an optional tenant ID the piece should be
 // reserved with.
 func WithReservePieceTenantID(tenantID int16) ReservePieceOption {
 	return func(opts *ReservePieceConfig) {
@@ -130,13 +130,20 @@ type Authorization struct {
 	LastPoll        *time.Time
 }
 
+type ErrorLogger interface {
+	// RequestError logs an error associated with a specific request ID.
+	RequestError(ctx context.Context, requestID uuid.UUID, code apitypes.APIErrorCode, message string, payload any) error
+}
+
 type AuthorizationService interface {
+	ErrorLogger
 	// Authorize validates and verifies a request's SPID challenge and returns
 	// authorization details.
 	Authorize(ctx context.Context, req Request) (Authorization, error)
 }
 
 type EligibilityService interface {
+	ErrorLogger
 	// EligiblePieces lists Piece CIDs a storage provider is eligible to receive a
 	// deal for. Unless configured differently, [listEligibleDefaultSize] pieces
 	// are returned. The boolean return value indicates whether there are more
@@ -145,26 +152,34 @@ type EligibilityService interface {
 }
 
 type ProposalService interface {
+	ErrorLogger
 	// PendingProposals lists current outstanding reservations including those in
 	// error.
 	PendingProposals(ctx context.Context, storageProvider fil.ActorID) ([]PendingProposal, error)
 }
 
 type PieceManifestService interface {
+	ErrorLogger
 	// PieceManifest produces a manifest for a segmented piece.
 	PieceManifest(ctx context.Context, storageProvider fil.ActorID, proposal uuid.UUID) (PieceManifest, error)
 }
 
 type ReservationService interface {
+	ErrorLogger
 	// ReservePiece requests a deal proposal (and thus reservation) for a specific
 	// Piece CID. Note: replication states may be returned for feedback to users
 	// even when an error occurs.
 	ReservePiece(ctx context.Context, storageProvider fil.ActorID, storageProviderInfo apitypes.SPInfo, piece cid.Cid, options ...ReservePieceOption) ([]apitypes.TenantReplicationState, error)
 }
 
+type StatusService interface {
+	ErrorLogger
+}
+
 // SpadeService defines the core business logic of the Spade SP API.
 type SpadeService interface {
 	AuthorizationService
+	ErrorLogger
 	EligibilityService
 	ProposalService
 	PieceManifestService

@@ -35,6 +35,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	if argCall := ctxMeta.signedArgs.Get("call"); argCall != "reserve_piece" {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"Unrecognized call '%s'",
 			argCall,
@@ -44,11 +45,12 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	pCidArg := ctxMeta.signedArgs.Get("piece_cid")
 	pCid, err := cid.Parse(pCidArg)
 	if err != nil {
-		return retFail(c, apitypes.ErrInvalidRequest, "Requested PieceCid '%s' is not valid: %s", pCidArg, err)
+		return retFail(c, svc, apitypes.ErrInvalidRequest, "Requested PieceCid '%s' is not valid: %s", pCidArg, err)
 	}
 	if pCid.Prefix().Codec != cid.FilCommitmentUnsealed || pCid.Prefix().MhType != multihash.SHA2_256_TRUNC254_PADDED {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"Requested PieceCID '%s' does not have expected codec (%x) and multihash (%x)",
 			pCid,
@@ -61,7 +63,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	if c.QueryParams().Has("tenant") {
 		tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 		tenantID = int16(tid)
 	}
@@ -71,6 +73,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 		ctxMeta.spInfoLastPolled.Before(time.Now().Add(-1*app.PolledSPInfoStaleAfterMinutes*time.Minute)) {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderInfoTooOld,
 			"Provider has not been dialed by the polling system recently: please try again in about a minute",
 		)
@@ -80,6 +83,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	if ctxMeta.spInfo.PeerInfo == nil || len(ctxMeta.spInfo.PeerInfo.Protos) == 0 {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderUndialable,
 			strings.Join([]string{
 				"It appears your provider can not be libp2p-dialed over the TCP transport.",
@@ -93,6 +97,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	if _, canV120 := ctxMeta.spInfo.PeerInfo.Protos[filtypes.StorageProposalV120]; !canV120 {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderUnsupported,
 			strings.Join([]string{
 				"It appears your provider does not support %s.",
@@ -113,51 +118,51 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 	)
 	if err != nil {
 		if errors.Is(err, service.ErrStorageProviderSuspended) {
-			return retFail(c, apitypes.ErrStorageProviderSuspended, ineligibleSpMsg(ctxMeta.authedActorID))
+			return retFail(c, svc, apitypes.ErrStorageProviderSuspended, ineligibleSpMsg(ctxMeta.authedActorID))
 		}
 		if errors.Is(err, service.ErrStorageProviderIneligibleToMine) {
-			return retFail(c, apitypes.ErrStorageProviderIneligibleToMine, ineligibleSpMsg(ctxMeta.authedActorID))
+			return retFail(c, svc, apitypes.ErrStorageProviderIneligibleToMine, ineligibleSpMsg(ctxMeta.authedActorID))
 		}
 		if errors.Is(err, service.ErrUnclaimedPiece) {
-			return retFail(c, apitypes.ErrUnclaimedPieceCID, "Piece %s is not claimed by any tenant", pCid)
+			return retFail(c, svc, apitypes.ErrUnclaimedPieceCID, "Piece %s is not claimed by any tenant", pCid)
 		}
 		if errors.Is(err, service.ErrOversizedPiece) {
-			return retFail(c, apitypes.ErrOversizedPiece,
+			return retFail(c, svc, apitypes.ErrOversizedPiece,
 				"Piece %s is larger than the %d GiB sector size your SP supports",
 				pCid,
 				1<<(ctxMeta.spInfo.SectorLog2Size-30),
 			)
 		}
 		if errors.Is(err, service.ErrProviderHasReplica) {
-			return retPayloadAnnotated(c, http.StatusForbidden,
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
 				apitypes.ErrProviderHasReplica,
 				apitypes.ResponseDealRequest{ReplicationStates: replStates},
 				"Provider already has proposed or active replica for %s according to all selected replication rules", pCid,
 			)
 		}
 		if errors.Is(err, service.ErrTenantsOutOfDatacap) {
-			return retPayloadAnnotated(c, http.StatusForbidden,
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
 				apitypes.ErrTenantsOutOfDatacap,
 				apitypes.ResponseDealRequest{ReplicationStates: replStates},
 				"All selected tenants with claim to %s are out of DataCap 🙀", pCid,
 			)
 		}
 		if errors.Is(err, service.ErrTooManyReplicas) {
-			return retPayloadAnnotated(c, http.StatusForbidden,
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
 				apitypes.ErrProviderAboveMaxInFlight,
 				apitypes.ResponseDealRequest{ReplicationStates: replStates},
 				"Provider has more proposals in-flight than permitted by selected tenant rules",
 			)
 		}
 		if errors.Is(err, service.ErrProviderAboveMaxInFlight) {
-			return retPayloadAnnotated(c, http.StatusForbidden,
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
 				apitypes.ErrProviderAboveMaxInFlight,
 				apitypes.ResponseDealRequest{ReplicationStates: replStates},
 				"Provider has more proposals in-flight than permitted by selected tenant rules",
 			)
 		}
 		if errors.Is(err, service.ErrReplicationRulesViolation) {
-			return retPayloadAnnotated(c, http.StatusForbidden,
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
 				apitypes.ErrReplicationRulesViolation,
 				apitypes.ResponseDealRequest{ReplicationStates: replStates},
 				"None of the selected tenants would grant a deal for %s according to their individual rules", pCid,
@@ -169,6 +174,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 			}
 			return retFail(
 				c,
+				svc,
 				apitypes.ErrInvalidRequest,
 				"Incorrect policy for tenant %d",
 				tenantID,
@@ -179,6 +185,7 @@ func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) 
 
 	return retPayloadAnnotated(
 		c,
+		svc,
 		http.StatusOK,
 		0,
 		apitypes.ResponseDealRequest{

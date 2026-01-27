@@ -28,7 +28,7 @@ func spidAuth(next echo.HandlerFunc, svc service.AuthorizationService) echo.Hand
 		// the SP portion does not accept body payloads
 		if b := c.Request().Body; b != nil && c.Request().ContentLength != 0 {
 			if _, err := b.Read(make([]byte, 1)); err != io.EOF {
-				return retFail(c, apitypes.ErrInvalidRequest, "spid requests with content in the HTTP body are not supported")
+				return retFail(c, svc, apitypes.ErrInvalidRequest, "spid requests with content in the HTTP body are not supported")
 			}
 		}
 
@@ -48,7 +48,7 @@ func spidAuth(next echo.HandlerFunc, svc service.AuthorizationService) echo.Hand
 			Headers: reqCopy.Header,
 		})
 		if err != nil {
-			return retAuthFail(c, "authorizing request: %s", spid.Scheme, err.Error())
+			return retAuthFail(c, svc, "authorizing request: %s", spid.Scheme, err.Error())
 		}
 
 		// set only on request object for logging, not part of response

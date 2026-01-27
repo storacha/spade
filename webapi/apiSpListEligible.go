@@ -27,7 +27,7 @@ func apiSpListEligible(c echo.Context, svc service.EligibilityService) error {
 		var err error
 		lim, err = parseUIntQueryParam(c, "limit", 1, service.ListEligibleMaxSize)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 	}
 
@@ -35,7 +35,7 @@ func apiSpListEligible(c echo.Context, svc service.EligibilityService) error {
 	if c.QueryParams().Has("tenant") {
 		tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 		tenantID = int16(tid)
 	}
@@ -93,5 +93,5 @@ func apiSpListEligible(c echo.Context, svc service.EligibilityService) error {
 		ret[i] = &p.Piece
 	}
 
-	return retPayloadAnnotated(c, http.StatusOK, 0, ret, strings.Join(info, "\n"))
+	return retPayloadAnnotated(c, svc, http.StatusOK, 0, ret, strings.Join(info, "\n"))
 }
