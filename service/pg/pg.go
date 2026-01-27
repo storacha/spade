@@ -21,17 +21,17 @@ type PgLotusSpadeService struct {
 	lookback uint
 }
 
-type PgSpadeServiceOption func(*PgLotusSpadeService)
+type PgLotusSpadeServiceOption func(*PgLotusSpadeService)
 
 // WithLookback sets the number of lookback epochs.
-func WithLookback(lookback uint) PgSpadeServiceOption {
+func WithLookback(lookback uint) PgLotusSpadeServiceOption {
 	return func(s *PgLotusSpadeService) {
 		s.lookback = lookback
 	}
 }
 
 // New creates a new Spade service backed by Postgres and Lotus.
-func New(db PgClient, lotusAPI service.SpadeLotusClient, opts ...PgSpadeServiceOption) *PgLotusSpadeService {
+func New(db PgClient, lotusAPI service.SpadeLotusClient, opts ...PgLotusSpadeServiceOption) *PgLotusSpadeService {
 	s := &PgLotusSpadeService{db: db, lotusAPI: lotusAPI, lookback: uint(app.FilDefaultLookback)}
 	for _, opt := range opts {
 		opt(s)
