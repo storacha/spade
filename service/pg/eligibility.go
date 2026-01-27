@@ -9,7 +9,7 @@ import (
 	"github.com/storacha/spade/service"
 )
 
-func (p *PgSpadeService) EligiblePieces(ctx context.Context, sp fil.ActorID, options ...service.EligiblePiecesOption) ([]service.EligiblePiece, bool, error) {
+func (p *PgLotusSpadeService) EligiblePieces(ctx context.Context, sp fil.ActorID, options ...service.EligiblePiecesOption) ([]service.EligiblePiece, bool, error) {
 	cfg := service.EligiblePiecesConfig{Limit: service.ListEligibleDefaultSize}
 	for _, opt := range options {
 		opt(&cfg)

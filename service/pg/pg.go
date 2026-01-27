@@ -15,28 +15,28 @@ type PgClient interface {
 	BeginFunc(ctx context.Context, f func(pgx.Tx) error) error
 }
 
-type PgSpadeService struct {
-	db        PgClient
-	filClient service.SpadeFilecoinClient
-	lookback  uint
+type PgLotusSpadeService struct {
+	db       PgClient
+	lotusAPI service.SpadeLotusClient
+	lookback uint
 }
 
-type PgSpadeServiceOption func(*PgSpadeService)
+type PgSpadeServiceOption func(*PgLotusSpadeService)
 
 // WithLookback sets the number of lookback epochs.
 func WithLookback(lookback uint) PgSpadeServiceOption {
-	return func(s *PgSpadeService) {
+	return func(s *PgLotusSpadeService) {
 		s.lookback = lookback
 	}
 }
 
-// New creates a new Spade service backed by Postgres.
-func New(db PgClient, filClient service.SpadeFilecoinClient, opts ...PgSpadeServiceOption) *PgSpadeService {
-	s := &PgSpadeService{db: db, filClient: filClient, lookback: uint(app.FilDefaultLookback)}
+// New creates a new Spade service backed by Postgres and Lotus.
+func New(db PgClient, lotusAPI service.SpadeLotusClient, opts ...PgSpadeServiceOption) *PgLotusSpadeService {
+	s := &PgLotusSpadeService{db: db, lotusAPI: lotusAPI, lookback: uint(app.FilDefaultLookback)}
 	for _, opt := range opts {
 		opt(s)
 	}
 	return s
 }
 
-var _ service.SpadeService = (*PgSpadeService)(nil)
+var _ service.SpadeService = (*PgLotusSpadeService)(nil)

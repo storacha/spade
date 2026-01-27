@@ -10,7 +10,7 @@ import (
 	"github.com/storacha/spade/service"
 )
 
-func (p *PgSpadeService) PendingProposals(ctx context.Context, sp fil.ActorID) ([]service.PendingProposal, error) {
+func (p *PgLotusSpadeService) PendingProposals(ctx context.Context, sp fil.ActorID) ([]service.PendingProposal, error) {
 	pending := make([]service.PendingProposal, 0, 4096)
 
 	if err := pgxscan.Select(

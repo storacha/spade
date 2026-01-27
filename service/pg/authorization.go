@@ -13,20 +13,25 @@ import (
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/service"
 	"github.com/storacha/spade/spid"
+	spid_lotus "github.com/storacha/spade/spid/lotus"
 )
 
-func (p *PgSpadeService) Authorize(ctx context.Context, req service.Request) (service.Authorization, error) {
+func (p *PgLotusSpadeService) Authorize(ctx context.Context, req service.Request) (service.Authorization, error) {
 	challenge, err := spid.Parse(req.Headers.Get("Authorization"))
 	if err != nil {
 		return service.Authorization{}, fmt.Errorf("parsing authorization header: %w", err)
 	}
 
-	err = spid.Verify(ctx, p.filClient, challenge)
+	err = spid_lotus.ResolveAndVerify(ctx, p.lotusAPI, challenge)
 	if err != nil {
 		return service.Authorization{}, fmt.Errorf("verifying authorization signature: %w", err)
 	}
 
 	sp := fil.MustParseActorString(challenge.Addr().String())
+	signedArgs, err := challenge.Args().Values()
+	if err != nil {
+		return service.Authorization{}, fmt.Errorf("getting signed args values: %w", err)
+	}
 
 	reqJ, err := json.Marshal(
 		struct {
@@ -41,7 +46,7 @@ func (p *PgSpadeService) Authorize(ctx context.Context, req service.Request) (se
 			Host:         req.Host,
 			Path:         req.Path,
 			Params:       req.Params.Encode(),
-			ParamsSigned: challenge.SignedArgs(),
+			ParamsSigned: signedArgs,
 			Headers:      req.Headers,
 		},
 	)
@@ -99,7 +104,7 @@ func (p *PgSpadeService) Authorize(ctx context.Context, req service.Request) (se
 	return service.Authorization{
 		RequestID:       reqID,
 		StateEpoch:      stateEpoch,
-		SignedArgs:      challenge.SignedArgs(),
+		SignedArgs:      signedArgs,
 		ProviderID:      sp,
 		ProviderDetails: spDetails,
 		ProviderInfo:    spInfo,

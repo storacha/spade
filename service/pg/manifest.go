@@ -12,7 +12,7 @@ import (
 	"github.com/storacha/spade/service"
 )
 
-func (p *PgSpadeService) PieceManifest(ctx context.Context, sp fil.ActorID, proposal uuid.UUID) (service.PieceManifest, error) {
+func (p *PgLotusSpadeService) PieceManifest(ctx context.Context, sp fil.ActorID, proposal uuid.UUID) (service.PieceManifest, error) {
 	pcs := make([]struct {
 		AggLog2Size int    `db:"agg_log2size"`
 		AggPCidV1   string `db:"agg_pcid_v1"`

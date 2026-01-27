@@ -23,13 +23,13 @@ import (
 
 const requestPieceLockStatement = `SELECT PG_ADVISORY_XACT_LOCK( 1234567890111 )`
 
-func (p *PgSpadeService) ReservePiece(ctx context.Context, sp fil.ActorID, spInfo apitypes.SPInfo, piece cid.Cid, options ...service.ReservePieceOption) ([]apitypes.TenantReplicationState, error) {
+func (p *PgLotusSpadeService) ReservePiece(ctx context.Context, sp fil.ActorID, spInfo apitypes.SPInfo, piece cid.Cid, options ...service.ReservePieceOption) ([]apitypes.TenantReplicationState, error) {
 	cfg := service.ReservePieceConfig{}
 	for _, opt := range options {
 		opt(&cfg)
 	}
 
-	err := spIneligibleErr(ctx, p.db, p.filClient, sp, p.lookback)
+	err := spIneligibleErr(ctx, p.db, p.lotusAPI, sp, p.lookback)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +268,7 @@ var providerEligibleCache, _ = ristretto.NewCache(&ristretto.Config{
 	Cost:    func(interface{}) int64 { return 1 },
 })
 
-func spIneligibleErr(ctx context.Context, db PgClient, filClient service.ReservationFilecoinClient, spID fil.ActorID, lookback uint) (defErr error) {
+func spIneligibleErr(ctx context.Context, db PgClient, filClient service.ReservationLotusClient, spID fil.ActorID, lookback uint) (defErr error) {
 	// do not cache chain-independent factors
 	var ignoreChainEligibility bool
 	err := db.QueryRow(
