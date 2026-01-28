@@ -48,7 +48,9 @@ func setup(ctx context.Context) *echo.Echo {
 	e.HideBanner = true
 	e.HidePort = true
 	e.JSONSerializer = new(rawJSONSerializer)
-	e.Any("*", retInvalidRoute)
+	e.Any("*", func(c echo.Context) error {
+		return retInvalidRoute(c, svc)
+	})
 
 	return e
 }
