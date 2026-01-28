@@ -1,4 +1,4 @@
-package main //nolint:revive
+package webapi //nolint:revive
 
 import (
 	"fmt"
