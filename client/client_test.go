@@ -39,8 +39,6 @@ import (
 const sectorSize = 32 * 1024
 
 func TestClient(t *testing.T) {
-	// logging.SetLogLevel("spade/client", "DEBUG")
-
 	sp, workerKey, pk := mockStorageProvider(t)
 
 	svc := mockSpadeService{
@@ -90,7 +88,6 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("pending proposals", func(t *testing.T) {
-
 		undeliveredProposal := mockUndeliveredProposal(t) // should not see in results
 		deliveredProposal := mockDeliveredProposal(t)
 		failedProposal := mockFailedProposal(t)
@@ -140,11 +137,11 @@ func TestClient(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, pieceManifest.PieceCid.String(), res.AggPCidV2)
 		require.Len(t, res.Segments, len(pieceManifest.SegmentCids))
+
 		for i, segment := range pieceManifest.SegmentCids {
 			require.Equal(t, segment.String(), res.Segments[i].PCidV2)
 			require.Len(t, res.Segments[i].Sources, 1)
-			// t.Log(res.Segments[i].PCidV2)
-			// t.Log(res.Segments[i].Sources[0])
+
 			u := new(bytes.Buffer)
 			err := ut.Execute(u, webapi.TemplateParams{SegPCidV2: segment.String()})
 			require.NoError(t, err)
@@ -153,13 +150,13 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("reserve piece", func(t *testing.T) {
-		piece := randomCommP(t, sectorSize+rand.Int63n(sectorSize/2))
+		commP := randomCommP(t, uint64(sectorSize+rand.Intn(sectorSize/2)))
 		replState := mockTenantReplicationState(t)
 		svc.tenantReplicationStates[sp] = map[cid.Cid][]apitypes.TenantReplicationState{
-			piece.PCidV1(): {replState},
+			commP.PCidV1(): {replState},
 		}
 
-		res, err := c.ReservePiece(context.Background(), piece.PCidV1())
+		res, err := c.ReservePiece(context.Background(), commP.PCidV1())
 		require.NoError(t, err)
 		require.Len(t, res.ReplicationStates, 1)
 		require.Equal(t, replState.TenantID, res.ReplicationStates[0].TenantID)
@@ -188,7 +185,7 @@ func startSpadeServer(t *testing.T, svc service.SpadeService) url.URL {
 }
 
 func mockStorageProvider(t *testing.T) (filaddr.Address, filaddr.Address, []byte) {
-	sp, err := filaddr.NewIDAddress(uint64(100 + rand.Int63n(10000)))
+	sp, err := filaddr.NewIDAddress(uint64(100 + rand.Intn(10000)))
 	require.NoError(t, err)
 
 	pk, err := base64.StdEncoding.DecodeString("DHdFHAqEZV/DJ8WlHqHkvxyEGqUfOJd78QwrkqkFrp4=")
@@ -297,15 +294,15 @@ var _ service.SpadeService = (*mockSpadeService)(nil)
 
 func mockEligiblePiece(t *testing.T) service.EligiblePiece {
 	t.Helper()
-	unpaddedSize := sectorSize + rand.Int63n(sectorSize/2)
-	commp := randomCommP(t, unpaddedSize)
+	unpaddedSize := sectorSize + rand.Intn(sectorSize/2)
+	commP := randomCommP(t, uint64(unpaddedSize))
 	return service.EligiblePiece{
 		PieceID:       1 + rand.Int63n(1000),
-		PieceLog2Size: uint8(commp.PieceLog2Size()),
+		PieceLog2Size: uint8(commP.PieceLog2Size()),
 		Tenants:       []int16{13},
 		Piece: apitypes.Piece{
-			PieceCid:         commp.PCidV1().String(),
-			PaddedPieceSize:  uint64(commp.PieceInfo().Size),
+			PieceCid:         commP.PCidV1().String(),
+			PaddedPieceSize:  uint64(commP.PieceInfo().Size),
 			ClaimingTenant:   13,
 			TenantPolicyCid:  randomCID(t).String(),
 			SampleReserveCmd: "test",
@@ -316,11 +313,11 @@ func mockEligiblePiece(t *testing.T) service.EligiblePiece {
 func mockUndeliveredProposal(t *testing.T) service.PendingProposal {
 	t.Helper()
 
-	client, err := filaddr.NewIDAddress(uint64(100 + rand.Int63n(10000)))
+	client, err := filaddr.NewIDAddress(uint64(100 + rand.Intn(10000)))
 	assert.NoError(t, err)
 
-	unpaddedSize := sectorSize + rand.Int63n(sectorSize/2)
-	commp := randomCommP(t, unpaddedSize)
+	unpaddedSize := sectorSize + rand.Intn(sectorSize/2)
+	commP := randomCommP(t, uint64(unpaddedSize))
 
 	startEpoch := fil.ClockMainnet.TimeToEpoch(time.Now()) + 900
 	startTime := fil.ClockMainnet.EpochToTime(startEpoch)
@@ -333,13 +330,13 @@ func mockUndeliveredProposal(t *testing.T) service.PendingProposal {
 		Error:             nil,
 		ProposalDelivered: nil,
 		IsPublished:       false,
-		PieceLog2Size:     commp.PieceLog2Size(),
+		PieceLog2Size:     commP.PieceLog2Size(),
 		DealProposal: apitypes.DealProposal{
 			ProposalID:     uuid.New().String(),
 			ProposalCid:    nil,
 			HoursRemaining: int(time.Until(startTime).Truncate(time.Hour).Hours()),
-			PieceSize:      int64(commp.PieceInfo().Size),
-			PieceCid:       commp.PCidV1().String(),
+			PieceSize:      int64(commP.PieceInfo().Size),
+			PieceCid:       commP.PCidV1().String(),
 			TenantID:       13,
 			TenantClient:   client.String(),
 			StartTime:      startTime,
@@ -378,13 +375,14 @@ func mockPublishedProposal(t *testing.T) service.PendingProposal {
 
 func mockPieceManifest(t *testing.T) service.PieceManifest {
 	t.Helper()
-	commp := randomCommP(t, rand.Int63n(sectorSize))
+	commP := randomCommP(t, uint64(sectorSize+rand.Intn(sectorSize/2)))
 	segmentCids := []cid.Cid{}
 	for range 1 + rand.Intn(4000) {
-		segmentCids = append(segmentCids, randomCID(t))
+		segCommp := randomCommP(t, commp.MinPiecePayload+uint64(rand.Intn(sectorSize)))
+		segmentCids = append(segmentCids, segCommp.PCidV2())
 	}
 	return service.PieceManifest{
-		PieceCid:    commp.PCidV2(),
+		PieceCid:    commP.PCidV2(),
 		SegmentCids: segmentCids,
 		UrlTemplate: "https://tenant.spade.example.com/{{.SegPCidV2}}",
 	}
@@ -392,7 +390,7 @@ func mockPieceManifest(t *testing.T) service.PieceManifest {
 
 func mockTenantReplicationState(t *testing.T) apitypes.TenantReplicationState {
 	t.Helper()
-	client, err := filaddr.NewIDAddress(uint64(100 + rand.Int63n(10000)))
+	client, err := filaddr.NewIDAddress(uint64(100 + rand.Intn(10000)))
 	assert.NoError(t, err)
 	clientstr := client.String()
 	return apitypes.TenantReplicationState{
@@ -422,21 +420,21 @@ func randomMultihash(t *testing.T) multihash.Multihash {
 	return digest
 }
 
-func randomCommP(t *testing.T, unpaddedSize int64) fil.CommP {
+func randomCommP(t *testing.T, unpaddedSize uint64) fil.CommP {
 	t.Helper()
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	dataReader := io.LimitReader(r, unpaddedSize)
+	dataReader := io.LimitReader(r, int64(unpaddedSize))
 
 	calc := &commp.Calc{}
 	n, err := io.Copy(calc, dataReader)
 	assert.NoError(t, err, "failed copying data into commp.Calc")
-	assert.Equal(t, unpaddedSize, n)
+	assert.Equal(t, unpaddedSize, uint64(n))
 
 	commP, _, err := calc.Digest()
 	assert.NoError(t, err, "failed to compute commP")
 
-	cp, err := fil.NewSha2CommP(uint64(unpaddedSize), commP)
+	cp, err := fil.NewSha2CommP(unpaddedSize, commP)
 	assert.NoError(t, err, "failed to create CommP")
 	return cp
 }
