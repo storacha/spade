@@ -40,7 +40,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/multiformats/go-multiaddr v0.16.1
 	github.com/multiformats/go-multihash v0.2.3
-	github.com/storacha/go-piece v0.0.0-20250604155842-600f0e474760
 	github.com/stretchr/testify v1.10.0
 	github.com/whyrusleeping/cbor-gen v0.3.1
 	golang.org/x/sync v0.16.0
