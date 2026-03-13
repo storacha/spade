@@ -1,0 +1,411 @@
+openapi: 3.0.3
+info:
+  title: Spade Storage Provider API
+  description: A Filecoin Storage Provider deal reservation and management API
+  version: '1.0'
+servers:
+  - url: https://api.spade.storacha.network
+    description: Production
+security:
+  - FIL-SPID-V0: []
+components:
+  securitySchemes:
+    FIL-SPID-V0:
+      type: apiKey
+      name: Authorization
+      in: header
+      description: 'Filecoin signature authentication (FIL-SPID-V0 scheme). Format: `FIL-SPID-V0 <epoch>;<spID>;<signature>[;<optional-signed-argument>]`'
+  schemas:
+    ResponseEnvelope:
+      type: object
+      required:
+        - response_code
+        - response_timestamp
+        - response
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Unique request identifier for tracking
+        response_code:
+          type: integer
+          description: HTTP-equivalent response code
+        response_timestamp:
+          type: string
+          format: date-time
+        response_state_epoch:
+          type: integer
+          format: int64
+          description: Filecoin chain epoch at time of response
+        error_code:
+          type: integer
+          description: Spade-specific error code (4000-series)
+        error_slug:
+          type: string
+          description: Machine-readable error identifier
+        error_lines:
+          type: array
+          items:
+            type: string
+        info_lines:
+          type: array
+          items:
+            type: string
+        response_entries:
+          type: integer
+          nullable: true
+          description: Number of entries in response array
+        response:
+          type: object
+          description: Type-specific response payload
+
+    Piece:
+      type: object
+      properties:
+        piece_cid:
+          type: string
+          description: Content identifier of the piece
+        padded_piece_size:
+          type: integer
+          format: uint64
+        tenant_id:
+          type: integer
+          format: int16
+        tenant_policy_cid:
+          type: string
+        sample_reserve_cmd:
+          type: string
+          description: Example curl command to reserve this piece
+
+    ResponsePiecesEligible:
+      type: array
+      items:
+        $ref: '#/components/schemas/Piece'
+
+    TenantReplicationState:
+      type: object
+      properties:
+        tenant_id:
+          type: integer
+          format: int16
+        tenant_client_id:
+          type: string
+          nullable: true
+        tenant_max_in_flight_bytes:
+          type: integer
+          format: int64
+        actual_in_flight_bytes:
+          type: integer
+          format: int64
+        tenant_max_total:
+          type: integer
+          format: int16
+        tenant_max_per_org:
+          type: integer
+          format: int16
+        tenant_max_per_metro:
+          type: integer
+          format: int16
+        tenant_max_per_country:
+          type: integer
+          format: int16
+        tenant_max_per_continent:
+          type: integer
+          format: int16
+        actual_total:
+          type: integer
+          format: int16
+        actual_within_org:
+          type: integer
+          format: int16
+        actual_within_metro:
+          type: integer
+          format: int16
+        actual_within_country:
+          type: integer
+          format: int16
+        actual_within_continent:
+          type: integer
+          format: int16
+        sp_holds_qualifying_deal:
+          type: boolean
+
+    ResponseDealRequest:
+      type: object
+      properties:
+        tenant_replication_states:
+          type: array
+          items:
+            $ref: '#/components/schemas/TenantReplicationState'
+        deal_start_time:
+          type: string
+          format: date-time
+          nullable: true
+        deal_start_epoch:
+          type: integer
+          format: int64
+          nullable: true
+
+    DealProposal:
+      type: object
+      properties:
+        deal_proposal_id:
+          type: string
+          format: uuid
+        deal_proposal_cid:
+          type: string
+          nullable: true
+        hours_remaining:
+          type: integer
+        piece_size:
+          type: integer
+          format: int64
+        piece_cid:
+          type: string
+        tenant_id:
+          type: integer
+          format: int16
+        tenant_client_id:
+          type: string
+        deal_start_time:
+          type: string
+          format: date-time
+        deal_start_epoch:
+          type: integer
+          format: int64
+        sample_import_cmd:
+          type: string
+        segmentation_type:
+          type: string
+          nullable: true
+        sample_assembly_cmd:
+          type: string
+          nullable: true
+        data_sources:
+          type: array
+          items:
+            type: string
+
+    ProposalFailure:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        error:
+          type: string
+        piece_cid:
+          type: string
+        deal_proposal_id:
+          type: string
+          format: uuid
+        deal_proposal_cid:
+          type: string
+          nullable: true
+        tenant_id:
+          type: integer
+          format: int16
+        tenant_client_id:
+          type: string
+
+    ResponsePendingProposals:
+      type: object
+      properties:
+        recent_failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProposalFailure'
+        pending_proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/DealProposal'
+
+    Segment:
+      type: object
+      properties:
+        pcid_v2:
+          type: string
+        sources:
+          type: array
+          items:
+            type: string
+
+    ResponsePieceManifestFR58:
+      type: object
+      properties:
+        frc58_aggregate:
+          type: string
+          description: Aggregate piece CID
+        piece_list:
+          type: array
+          items:
+            $ref: '#/components/schemas/Segment'
+
+paths:
+  /sp/status:
+    get:
+      summary: Get system and storage provider status
+      description: Human and machine readable information about the system and the currently-authenticated SP. Returns status information on successful authentication.
+      operationId: getSpStatus
+      tags:
+        - StorageProvider
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      response:
+                        type: object
+        '401':
+          description: Authentication failed
+        '503':
+          description: System temporarily disabled
+
+  /sp/eligible_pieces:
+    get:
+      summary: List eligible pieces for reservation
+      description: Produces a listing of PieceCIDs that a storage provider is eligible to receive a deal for. The list is dynamic and offers a near-real-time view specific to the authenticated SP.
+      operationId: listEligiblePieces
+      tags:
+        - StorageProvider
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of results to return
+          schema:
+            type: integer
+            default: 100
+        - name: tenant
+          in: query
+          description: Restrict list to pieces claimed by specific TenantID
+          schema:
+            type: integer
+            format: int16
+        - name: include-sourceless
+          in: query
+          description: Include eligible pieces without known sources
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of eligible pieces
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      response:
+                        $ref: '#/components/schemas/ResponsePiecesEligible'
+        '400':
+          description: Invalid request parameters
+        '401':
+          description: Authentication failed
+        '403':
+          description: Storage provider not eligible
+
+  /sp/pending_proposals:
+    get:
+      summary: List pending proposals and recent failures
+      description: Produces a list of current outstanding reservations, recent errors and various statistics for the authenticated SP.
+      operationId: listPendingProposals
+      tags:
+        - StorageProvider
+      responses:
+        '200':
+          description: List of pending proposals
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      response:
+                        $ref: '#/components/schemas/ResponsePendingProposals'
+        '401':
+          description: Authentication failed
+
+  /sp/piece_manifest:
+    get:
+      summary: Get piece manifest for segmented piece
+      description: Produces a manifest for a segmented piece. A valid reservation proposal UUID is required to retrieve the manifest.
+      operationId: getPieceManifest
+      tags:
+        - StorageProvider
+      parameters:
+        - name: proposal
+          in: query
+          required: true
+          description: Reservation proposal UUID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Piece manifest retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      response:
+                        $ref: '#/components/schemas/ResponsePieceManifestFR58'
+        '400':
+          description: Missing or invalid proposal parameter
+        '401':
+          description: Authentication failed
+        '404':
+          description: Proposal not found
+
+  /sp/invoke:
+    post:
+      summary: Invoke RPC methods
+      description: The sole mutating endpoint. Supports RPC-style calls including reserve_piece for requesting deal proposals.
+      operationId: invokeSpMethod
+      tags:
+        - StorageProvider
+      parameters:
+        - name: call
+          in: query
+          required: true
+          description: RPC method name
+          schema:
+            type: string
+            enum:
+              - reserve_piece
+        - name: piece_cid
+          in: query
+          required: true
+          description: PieceCID to reserve
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deal proposal queued for delivery
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ResponseEnvelope'
+                  - type: object
+                    properties:
+                      response:
+                        $ref: '#/components/schemas/ResponseDealRequest'
+        '400':
+          description: Invalid request or piece CID
+        '401':
+          description: Authentication failed
+        '403':
+          description: Storage provider not eligible (various reasons)
+        '503':
+          description: System temporarily disabled

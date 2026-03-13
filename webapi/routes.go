@@ -6,7 +6,7 @@ import (
 )
 
 // This lists in one place all recognized routes & parameters
-// FIXME - we should make an openapi or something for this...
+
 func registerRoutes(e *echo.Echo, svc service.SpadeService) {
 	spRoutes := e.Group("/sp", NewSpIDAuthMiddleware(svc))
 
