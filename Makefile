@@ -6,7 +6,7 @@ mkbin:
 	@mkdir -p bin/
 
 webapi: mkbin genapitypes
-	go build -o bin/spade-webapi ./webapi
+	go build -o bin/spade-webapi ./cmd/webapi
 
 genapitypes:
 	go generate ./apitypes/apierrors.go

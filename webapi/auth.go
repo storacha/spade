@@ -1,4 +1,4 @@
-package main
+package webapi
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
-	"github.com/storacha/spade/internal/app"
 	"github.com/storacha/spade/service"
 	"github.com/storacha/spade/spid"
 )
@@ -23,7 +22,7 @@ func NewSpIDAuthMiddleware(svc service.AuthorizationService) echo.MiddlewareFunc
 
 func spidAuth(next echo.HandlerFunc, svc service.AuthorizationService) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		ctx, _, _, _ := app.UnpackCtx(c.Request().Context())
+		ctx := c.Request().Context()
 
 		// the SP portion does not accept body payloads
 		if b := c.Request().Body; b != nil && c.Request().ContentLength != 0 {
@@ -65,7 +64,6 @@ func spidAuth(next echo.HandlerFunc, svc service.AuthorizationService) echo.Hand
 		c.Response().Header().Set("X-SPADE-REQUEST-UUID", auth.RequestID.String())
 
 		c.Set("♠️", metaContext{
-			GlobalContext:    app.GetGlobalCtx(ctx),
 			requestID:        auth.RequestID,
 			stateEpoch:       auth.StateEpoch,
 			authedActorID:    auth.ProviderID,
@@ -83,7 +81,6 @@ func spidAuth(next echo.HandlerFunc, svc service.AuthorizationService) echo.Hand
 }
 
 type metaContext struct {
-	app.GlobalContext
 	requestID        uuid.UUID
 	authedActorID    fil.ActorID
 	stateEpoch       int64

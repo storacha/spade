@@ -19,6 +19,7 @@ require (
 	github.com/filecoin-project/go-address v1.2.0
 	github.com/filecoin-project/go-cbor-util v0.0.2
 	github.com/filecoin-project/go-data-segment v0.0.1
+	github.com/filecoin-project/go-fil-commp-hashhash v0.2.0
 	github.com/filecoin-project/go-state-types v0.17.0
 	github.com/filecoin-project/lotus v1.34.1
 	github.com/fxamacker/cbor/v2 v2.7.0
@@ -30,6 +31,7 @@ require (
 	github.com/ipfs/go-cid v0.5.0
 	github.com/ipfs/go-ipld-cbor v0.2.1
 	github.com/ipfs/go-log/v2 v2.6.0
+	github.com/jackc/pgconn v1.14.3
 	github.com/jackc/pgx/v4 v4.18.3
 	github.com/jsign/go-filsigner v0.4.1
 	github.com/labstack/echo/v4 v4.11.4
@@ -136,7 +138,6 @@ require (
 	github.com/ipld/go-codec-dagpb v1.7.0 // indirect
 	github.com/ipld/go-ipld-prime v0.21.0 // indirect
 	github.com/jackc/chunkreader/v2 v2.0.1 // indirect
-	github.com/jackc/pgconn v1.14.3 // indirect
 	github.com/jackc/pgio v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgproto3/v2 v2.3.3 // indirect

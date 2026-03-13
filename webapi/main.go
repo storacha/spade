@@ -1,4 +1,4 @@
-package main
+package webapi
 
 import (
 	"context"
@@ -41,7 +41,7 @@ func setup(ctx context.Context) *echo.Echo {
 	svc := pg.New(db, gCtx.LotusAPI)
 
 	// routes
-	registerRoutes(e, svc)
+	RegisterRoutes(e, svc)
 
 	//
 	// Housekeeping
@@ -72,7 +72,7 @@ func (rawJSONSerializer) Deserialize(c echo.Context, i interface{}) error {
 	return defJSONSerializer.Deserialize(c, i)
 }
 
-func main() {
+func Start() {
 	cmdName := app.AppName + "-webapi"
 	log := logging.Logger(fmt.Sprintf("%s(%d)", cmdName, os.Getpid()))
 
