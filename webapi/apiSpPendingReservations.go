@@ -9,90 +9,25 @@ import (
 	"code.riba.cloud/go/toolbox-interplanetary/fil"
 	"code.riba.cloud/go/toolbox/cmn"
 	filabi "github.com/filecoin-project/go-state-types/abi"
-	filbuiltin "github.com/filecoin-project/go-state-types/builtin"
-	"github.com/georgysavva/scany/pgxscan"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
-	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
 )
 
-func apiSpListPendingProposals(c echo.Context) error {
+func NewSpListPendingProposalsHandler(svc service.ProposalService) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		return apiSpListPendingProposals(c, svc)
+	}
+}
+
+func apiSpListPendingProposals(c echo.Context, svc service.ProposalService) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
-	type pendingProposals struct {
-		apitypes.DealProposal
-		ClientID          fil.ActorID
-		PieceID           int64
-		ProposalFailstamp int64
-		Error             *string
-		ProposalDelivered *time.Time
-		IsPublished       bool
-		PieceLog2Size     int8
-	}
-	pending := make([]pendingProposals, 0, 4096)
-
-	if err := pgxscan.Select(
+	pending, err := svc.PendingProposals(
 		ctx,
-		ctxMeta.Db[app.DbMain],
-		&pending,
-		`
-		SELECT
-				pr.proposal_uuid AS proposal_id,
-				pr.piece_id,
-				pr.proposal_meta->>'signed_proposal_cid' AS proposal_cid,
-				pr.start_epoch,
-				pr.client_id,
-				pr.proposal_delivered,
-				c.tenant_id,
-				p.piece_cid,
-				pr.proxied_log2_size AS piece_log2_size,
-				pr.proposal_failstamp,
-				pr.proposal_meta->>'failure' AS error,
-				( EXISTS (
-					SELECT 42
-						FROM spd.published_deals pd
-					WHERE
-						pd.piece_id = pr.piece_id
-							AND
-						pd.provider_id = pr.provider_id
-							AND
-						pd.client_id = pr.client_id
-							AND
-						pd.status = 'published'
-				) ) AS is_published,
-				ARRAY(
-					SELECT uri FROM spd.sources_uri WHERE sources_uri.piece_id = pr.piece_id
-				) AS data_sources,
-				(
-					CASE WHEN (p.piece_meta->'is_frc58_segmented')::bool THEN 'frc58' ELSE NULL END
-				) AS segmentation
-			FROM spd.proposals pr
-			JOIN spd.pieces p USING ( piece_id )
-			JOIN spd.clients c USING ( client_id )
-			LEFT JOIN spd.mv_pieces_availability pa USING ( piece_id )
-		WHERE
-			pr.provider_id = $1
-				AND
-			pr.start_epoch > $2
-				AND
-			pr.activated_deal_id is NULL
-				AND
-			(
-				pr.proposal_failstamp = 0
-					OR
-				-- show everything failed in the past N hours
-				pr.proposal_failstamp > ( spd.big_now() - $3::BIGINT * 3600 * 1000 * 1000 * 1000 )
-			)
-		ORDER BY
-			pr.proposal_failstamp DESC,
-			( pr.start_epoch / 360 ), -- 3h sort granularity
-			pr.proxied_log2_size,
-			p.piece_cid
-		`,
 		ctxMeta.authedActorID,
-		fil.ClockMainnet.TimeToEpoch(time.Now())+filbuiltin.EpochsInHour,
-		showRecentFailuresHours,
-	); err != nil {
+	)
+	if err != nil {
 		return cmn.WrErr(err)
 	}
 
@@ -159,14 +94,14 @@ func apiSpListPendingProposals(c echo.Context) error {
 
 	msg := fmt.Sprintf(
 		`
-This is an overview of deals recently proposed to SP %s
+	This is an overview of deals recently proposed to SP %s
 
-There currently are %0.2f GiB of pending deals:
-  % 4d deal-proposals to send out
-  % 4d successful proposals pending publishing
-  % 4d deals published on chain awaiting sector activation
+	There currently are %0.2f GiB of pending deals:
+		% 4d deal-proposals to send out
+		% 4d successful proposals pending publishing
+		% 4d deals published on chain awaiting sector activation
 
-You can request deal proposals using API endpoints as described in the docs`,
+	You can request deal proposals using API endpoints as described in the docs`,
 		ctxMeta.authedActorID,
 		float64(outstandingBytes)/(1<<30),
 		toPropose,
@@ -175,7 +110,7 @@ You can request deal proposals using API endpoints as described in the docs`,
 	)
 
 	if len(fails) > 0 {
-		msg += fmt.Sprintf("\n\nIn the past %dh there were %d proposal errors, shown in recent_failures below.", showRecentFailuresHours, len(fails))
+		msg += fmt.Sprintf("\n\nIn the past %dh there were %d proposal errors, shown in recent_failures below.", service.ShowRecentFailuresHours, len(fails))
 
 		ret.RecentFailures = make([]apitypes.ProposalFailure, 0, len(fails))
 		for _, f := range fails {
@@ -188,6 +123,7 @@ You can request deal proposals using API endpoints as described in the docs`,
 
 	return retPayloadAnnotated(
 		c,
+		svc,
 		http.StatusOK,
 		0,
 		ret,

@@ -15,10 +15,11 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service/pg"
 	"golang.org/x/sys/unix"
 )
 
-func setup() *echo.Echo {
+func setup(ctx context.Context) *echo.Echo {
 	//
 	// Server setup
 	e := echo.New()
@@ -34,15 +35,22 @@ func setup() *echo.Echo {
 		},
 	))
 
+	// [app.GlobalInit] will have run by this point so main DB should be available
+	// on context.
+	_, _, db, gCtx := app.UnpackCtx(ctx)
+	svc := pg.New(db, gCtx.LotusAPI)
+
 	// routes
-	registerRoutes(e)
+	registerRoutes(e, svc)
 
 	//
 	// Housekeeping
 	e.HideBanner = true
 	e.HidePort = true
 	e.JSONSerializer = new(rawJSONSerializer)
-	e.Any("*", retInvalidRoute)
+	e.Any("*", func(c echo.Context) error {
+		return retInvalidRoute(c, svc)
+	})
 
 	return e
 }
@@ -93,7 +101,7 @@ func main() {
 				// we will still catch the failure-to-write either way
 				signal.Ignore(unix.SIGPIPE)
 
-				e = setup()
+				e = setup(cctx.Context)
 				e.Server.BaseContext = func(net.Listener) context.Context { return cctx.Context }
 				return e.Start(cctx.String("webapi-listen-address"))
 			},

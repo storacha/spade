@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,11 +11,10 @@ import (
 
 	"code.riba.cloud/go/toolbox-interplanetary/fil"
 	"code.riba.cloud/go/toolbox/cmn"
-	"github.com/dgraph-io/ristretto"
-	"github.com/jackc/pgx/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
-	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
+	"github.com/storacha/spade/spid"
 	"golang.org/x/xerrors"
 )
 
@@ -44,7 +41,7 @@ func parseUIntQueryParam(c echo.Context, pname string, min, max uint64) (uint64,
 	return val, nil
 }
 
-func retPayloadAnnotated(c echo.Context, httpCode int, errCode apitypes.APIErrorCode, payload apitypes.ResponsePayload, fmsg string, args ...interface{}) error {
+func retPayloadAnnotated(c echo.Context, log service.ErrorLogger, httpCode int, errCode apitypes.APIErrorCode, payload apitypes.ResponsePayload, fmsg string, args ...interface{}) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
 	msg := fmt.Sprintf(fmsg, args...)
@@ -93,29 +90,8 @@ func retPayloadAnnotated(c echo.Context, httpCode int, errCode apitypes.APIError
 		c.Request().Header.Set("X-SPADE-FAILURE-SLUG", r.ErrSlug) // set on *request* so that echo can log it
 
 		if r.RequestID != "" && (msg != "" || errCode != 0) {
-			jPayload, err := json.Marshal(payload)
+			err := log.RequestError(ctx, ctxMeta.requestID, errCode, msg, payload)
 			if err != nil {
-				return cmn.WrErr(err)
-			}
-			if _, err := ctxMeta.Db[app.DbMain].Exec(
-				ctx,
-				`
-				UPDATE spd.requests SET
-					request_meta = JSONB_STRIP_NULLS( request_meta || JSONB_BUILD_OBJECT(
-						'error', $1::TEXT,
-						'error_code', $2::INTEGER,
-						'error_slug', $3::TEXT,
-						'payload', $4::JSONB
-					) )
-				WHERE
-					request_uuid = $5
-				`,
-				msg,
-				r.ErrCode,
-				r.ErrSlug,
-				jPayload,
-				r.RequestID,
-			); err != nil {
 				return cmn.WrErr(err)
 			}
 		}
@@ -149,9 +125,10 @@ func curlAuthedForSP(c echo.Context, spID fil.ActorID, path string, sigArgs url.
 	)
 }
 
-func retFail(c echo.Context, errCode apitypes.APIErrorCode, fMsg string, args ...interface{}) error {
+func retFail(c echo.Context, log service.ErrorLogger, errCode apitypes.APIErrorCode, fMsg string, args ...interface{}) error {
 	return retPayloadAnnotated(
 		c,
+		log,
 		http.StatusForbidden, // DO NOT use 400: we rewrite that on the nginx level to normalize a class of transport errors
 		errCode,
 		nil,
@@ -159,10 +136,11 @@ func retFail(c echo.Context, errCode apitypes.APIErrorCode, fMsg string, args ..
 	)
 }
 
-func retAuthFail(c echo.Context, f string, args ...interface{}) error {
-	c.Response().Header().Set(echo.HeaderWWWAuthenticate, authScheme)
+func retAuthFail(c echo.Context, log service.ErrorLogger, f string, args ...interface{}) error {
+	c.Response().Header().Set(echo.HeaderWWWAuthenticate, spid.Scheme)
 	return retPayloadAnnotated(
 		c,
+		log,
 		http.StatusUnauthorized,
 		apitypes.ErrUnauthorizedAccess,
 		nil,
@@ -171,22 +149,16 @@ func retAuthFail(c echo.Context, f string, args ...interface{}) error {
 	)
 }
 
-func retInvalidRoute(c echo.Context) error {
+func retInvalidRoute(c echo.Context, log service.ErrorLogger) error {
 	return retFail(
 		c,
+		log,
 		apitypes.ErrInvalidRequest,
 		"invalid route request: %s %s",
 		c.Request().Method,
 		c.Request().RequestURI,
 	)
 }
-
-// using ristretto here because of SetWithTTL() below
-var providerEligibleCache, _ = ristretto.NewCache(&ristretto.Config{
-	NumCounters: 1e7, BufferItems: 64,
-	MaxCost: 1024,
-	Cost:    func(interface{}) int64 { return 1 },
-})
 
 func ineligibleSpMsg(spID fil.ActorID) string {
 	return fmt.Sprintf(
@@ -201,63 +173,9 @@ Make sure that you:
 - Have not faulted in the past 48h
 
 If the problem persists, or you believe this is a spurious error: please contact the API
-administrators in #spade-sp over at the Fil Slack https://filecoin.io/slack
-( direct link: https://filecoinproject.slack.com/archives/C0377FJCG1L )
+administrators in #♠-spade-sp-♠ over at the Storacha Discord https://discord.gg/pqa6Dn6RnP.
+( direct link: https://discord.com/channels/1247475892435816553/1365086771347587072 )
 `,
 		spID,
 	)
-}
-
-func spIneligibleErr(ctx context.Context, spID fil.ActorID) (defIneligibleCode apitypes.APIErrorCode, defErr error) {
-	_, _, db, gctx := app.UnpackCtx(ctx)
-
-	// do not cache chain-independent factors
-	var ignoreChainEligibility bool
-	err := db.QueryRow(
-		ctx,
-		`
-		SELECT COALESCE( ( provider_meta->'ignore_chain_eligibility' )::BOOL, false )
-			FROM spd.providers
-		WHERE
-			NOT COALESCE( ( provider_meta->'globally_inactivated' )::BOOL, false )
-				AND
-			provider_id = $1
-		`,
-		spID,
-	).Scan(&ignoreChainEligibility)
-	if err == pgx.ErrNoRows {
-		return apitypes.ErrStorageProviderSuspended, nil
-	} else if err != nil {
-		return 0, cmn.WrErr(err)
-	} else if ignoreChainEligibility {
-		return 0, nil
-	}
-
-	defer func() {
-		if defErr != nil {
-			providerEligibleCache.Del(uint64(spID))
-			defIneligibleCode = 0
-		} else {
-			providerEligibleCache.SetWithTTL(uint64(spID), defIneligibleCode, 1, time.Minute)
-		}
-	}()
-
-	if protoReason, found := providerEligibleCache.Get(uint64(spID)); found {
-		return protoReason.(apitypes.APIErrorCode), nil
-	}
-
-	curTipset, err := app.DefaultLookbackTipset(ctx)
-	if err != nil {
-		return 0, cmn.WrErr(err)
-	}
-
-	mbi, err := gctx.LotusAPI.MinerGetBaseInfo(ctx, spID.AsFilAddr(), curTipset.Height(), curTipset.Key())
-	if err != nil {
-		return 0, cmn.WrErr(err)
-	}
-	if mbi == nil || !mbi.EligibleForMining {
-		return apitypes.ErrStorageProviderIneligibleToMine, nil
-	}
-
-	return 0, nil
 }

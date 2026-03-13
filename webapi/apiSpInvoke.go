@@ -1,31 +1,29 @@
 package main
 
 import (
-	"context"
+	"errors"
 	"fmt"
-	"math/bits"
 	"net/http"
 	"strings"
 	"time"
 
-	"code.riba.cloud/go/toolbox-interplanetary/fil"
 	"code.riba.cloud/go/toolbox/cmn"
-	filabi "github.com/filecoin-project/go-state-types/abi"
-	filbig "github.com/filecoin-project/go-state-types/big"
-	filbuiltin "github.com/filecoin-project/go-state-types/builtin"
-	filmarket "github.com/filecoin-project/go-state-types/builtin/v9/market"
-	"github.com/georgysavva/scany/pgxscan"
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ipfs/go-cid"
-	"github.com/jackc/pgx/v4"
 	"github.com/labstack/echo/v4"
 	"github.com/multiformats/go-multihash"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
 	"github.com/storacha/spade/internal/filtypes"
+	"github.com/storacha/spade/service"
 )
 
-func apiSpInvoke(c echo.Context) (defErr error) {
+func NewSpInvokeHandler(svc service.ReservationService) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		return apiSpInvoke(c, svc)
+	}
+}
+
+func apiSpInvoke(c echo.Context, svc service.ReservationService) (defErr error) {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
 	// return retFail(
@@ -37,6 +35,7 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 	if argCall := ctxMeta.signedArgs.Get("call"); argCall != "reserve_piece" {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"Unrecognized call '%s'",
 			argCall,
@@ -46,11 +45,12 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 	pCidArg := ctxMeta.signedArgs.Get("piece_cid")
 	pCid, err := cid.Parse(pCidArg)
 	if err != nil {
-		return retFail(c, apitypes.ErrInvalidRequest, "Requested PieceCid '%s' is not valid: %s", pCidArg, err)
+		return retFail(c, svc, apitypes.ErrInvalidRequest, "Requested PieceCid '%s' is not valid: %s", pCidArg, err)
 	}
 	if pCid.Prefix().Codec != cid.FilCommitmentUnsealed || pCid.Prefix().MhType != multihash.SHA2_256_TRUNC254_PADDED {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrInvalidRequest,
 			"Requested PieceCID '%s' does not have expected codec (%x) and multihash (%x)",
 			pCid,
@@ -63,7 +63,7 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 	if c.QueryParams().Has("tenant") {
 		tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 		tenantID = int16(tid)
 	}
@@ -73,6 +73,7 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 		ctxMeta.spInfoLastPolled.Before(time.Now().Add(-1*app.PolledSPInfoStaleAfterMinutes*time.Minute)) {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderInfoTooOld,
 			"Provider has not been dialed by the polling system recently: please try again in about a minute",
 		)
@@ -82,6 +83,7 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 	if ctxMeta.spInfo.PeerInfo == nil || len(ctxMeta.spInfo.PeerInfo.Protos) == 0 {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderUndialable,
 			strings.Join([]string{
 				"It appears your provider can not be libp2p-dialed over the TCP transport.",
@@ -95,6 +97,7 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 	if _, canV120 := ctxMeta.spInfo.PeerInfo.Protos[filtypes.StorageProposalV120]; !canV120 {
 		return retFail(
 			c,
+			svc,
 			apitypes.ErrStorageProviderUnsupported,
 			strings.Join([]string{
 				"It appears your provider does not support %s.",
@@ -104,301 +107,95 @@ func apiSpInvoke(c echo.Context) (defErr error) {
 		)
 	}
 
-	errCode, err := spIneligibleErr(ctx, ctxMeta.authedActorID)
+	replStates, err := svc.ReservePiece(
+		ctx,
+		ctxMeta.authedActorID,
+		ctxMeta.spInfo,
+		pCid,
+		service.WithReservePieceRequestID(ctxMeta.requestID),
+		service.WithReservePieceTenantID(tenantID),
+		service.WithReservePieceTenantPolicy(ctxMeta.signedArgs.Get("tenant_policy")),
+	)
 	if err != nil {
-		return cmn.WrErr(err)
-	} else if errCode != 0 {
-		return retFail(c, errCode, ineligibleSpMsg(ctxMeta.authedActorID))
-	}
-
-	return ctxMeta.Db[app.DbMain].BeginFunc(ctx, func(tx pgx.Tx) error {
-
-		_, err = tx.Exec(
-			ctx,
-			requestPieceLockStatement,
-		)
-		if err != nil {
-			return cmn.WrErr(err)
+		if errors.Is(err, service.ErrStorageProviderSuspended) {
+			return retFail(c, svc, apitypes.ErrStorageProviderSuspended, ineligibleSpMsg(ctxMeta.authedActorID))
 		}
-
-		type tenantEligible struct {
-			apitypes.TenantReplicationState
-			IsExclusive         bool         `db:"exclusive_replication"`
-			TenantClientID      *fil.ActorID `db:"client_id_to_use"`
-			TenantClientAddress *string      `db:"client_address_to_use"`
-
-			PieceID        int64
-			PieceSizeBytes int64
-
-			DealDurationDays       int16
-			StartWithinHours       int16
-			RecentlyUsedStartEpoch *int64
-
-			TenantMeta []byte
+		if errors.Is(err, service.ErrStorageProviderIneligibleToMine) {
+			return retFail(c, svc, apitypes.ErrStorageProviderIneligibleToMine, ineligibleSpMsg(ctxMeta.authedActorID))
 		}
-
-		tenantsEligible := make([]tenantEligible, 0, 8)
-
-		if err := pgxscan.Select(
-			ctx,
-			tx,
-			&tenantsEligible,
-			`
-			SELECT
-					*
-				FROM spd.piece_realtime_eligibility( $1, $2 )
-			WHERE
-				( 0 = $3 OR tenant_id = $3)
-			`,
-			ctxMeta.authedActorID,
-			pCid,
-			tenantID,
-		); err != nil {
-			return cmn.WrErr(err)
+		if errors.Is(err, service.ErrUnclaimedPiece) {
+			return retFail(c, svc, apitypes.ErrUnclaimedPieceCID, "Piece %s is not claimed by any tenant", pCid)
 		}
-
-		if len(tenantsEligible) == 0 {
-			return retFail(c, apitypes.ErrUnclaimedPieceCID, "Piece %s is not claimed by any selected tenant", pCid)
-		}
-
-		if tenantsEligible[0].PieceSizeBytes > 1<<ctxMeta.spInfo.SectorLog2Size {
-			return retFail(c, apitypes.ErrOversizedPiece,
-				"Piece %s weighing %d GiB is larger than the %d GiB sector size your SP supports",
+		if errors.Is(err, service.ErrOversizedPiece) {
+			return retFail(c, svc, apitypes.ErrOversizedPiece,
+				"Piece %s is larger than the %d GiB sector size your SP supports",
 				pCid,
-				tenantsEligible[0].PieceSizeBytes>>30,
 				1<<(ctxMeta.spInfo.SectorLog2Size-30),
 			)
 		}
-
-		// count ineligibles, assemble actual return
-		var countNoDataCap, countAlreadyDealt, countOverReplicated, countOverPending int
-		var chosenTenant *tenantEligible
-		resp := apitypes.ResponseDealRequest{
-			ReplicationStates: make([]apitypes.TenantReplicationState, len(tenantsEligible)),
-		}
-		for i, te := range tenantsEligible {
-			if te.TenantClientID != nil {
-				s := te.TenantClientID.String()
-				te.TenantReplicationState.TenantClient = &s
-			}
-			resp.ReplicationStates[i] = te.TenantReplicationState
-
-			var invalidated bool
-
-			if te.TenantClient == nil {
-				countNoDataCap++
-				invalidated = true
-			}
-			if te.DealAlreadyExists {
-				countAlreadyDealt++
-				invalidated = true
-			}
-			if te.Total >= te.MaxTotal ||
-				te.InOrg >= te.MaxOrg ||
-				te.InCity >= te.MaxCity ||
-				te.InCountry >= te.MaxCountry ||
-				te.InContinent >= te.MaxContinent {
-				countOverReplicated++
-				invalidated = true
-			}
-			if te.SpInFlightBytes+te.PieceSizeBytes > te.MaxInFlightBytes {
-				countOverPending++
-				invalidated = true
-			}
-
-			if !invalidated && chosenTenant == nil {
-				chosenTenant = &te
-			}
-		}
-
-		// handle "no takers" here, for ease of reading further down
-		// this is slightly convoluted since we can have a "mixed error condition" - handled in the default:
-		if chosenTenant == nil {
-
-			switch len(tenantsEligible) {
-
-			case countAlreadyDealt:
-				return retPayloadAnnotated(c, http.StatusForbidden,
-					apitypes.ErrProviderHasReplica,
-					resp,
-					"Provider already has proposed or active replica for %s according to all selected replication rules", pCid,
-				)
-			case countNoDataCap:
-				return retPayloadAnnotated(c, http.StatusForbidden,
-					apitypes.ErrTenantsOutOfDatacap,
-					resp,
-					"All selected tenants with claim to %s are out of DataCap 🙀", pCid,
-				)
-
-			case countOverReplicated:
-				return retPayloadAnnotated(c, http.StatusForbidden,
-					apitypes.ErrTooManyReplicas,
-					resp,
-					"Piece %s is over-replicated according to all selected replication rules", pCid,
-				)
-
-			case countOverPending:
-				return retPayloadAnnotated(c, http.StatusForbidden,
-					apitypes.ErrProviderAboveMaxInFlight,
-					resp,
-					"Provider has more proposals in-flight than permitted by selected tenant rules",
-				)
-
-			default:
-				return retPayloadAnnotated(c, http.StatusForbidden,
-					apitypes.ErrReplicationRulesViolation,
-					resp,
-					"None of the selected tenants would grant a deal for %s according to their individual rules", pCid,
-				)
-			}
-		}
-
-		if ctxMeta.signedArgs.Get("tenant_policy") != app.TEMPPolicies[chosenTenant.TenantID] {
-			return retFail(
-				c,
-				apitypes.ErrInvalidRequest,
-				"Incorrect policy for tenant %d",
-				chosenTenant.TenantID,
+		if errors.Is(err, service.ErrProviderHasReplica) {
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
+				apitypes.ErrProviderHasReplica,
+				apitypes.ResponseDealRequest{ReplicationStates: replStates},
+				"Provider already has proposed or active replica for %s according to all selected replication rules", pCid,
 			)
 		}
-
-		//
-		// Here, at the very end, is where we would make a tightly-timeboxed outbound call
-		// to check for potential external eligibility criteria
-		// Then either return ErrExternalReservationRefused or proceed below.
-		//
-		// We *DO* always check using our own replication rules first, and keep a lock for the duration
-		// ( in order to maintain a uniform "decency floor" among our esteemed SPs ;)
-		//
-
-		// We got that far - let's do it!
-		startEpoch := fil.ClockMainnet.TimeToEpoch(time.Now().Add(
-			time.Hour * time.Duration(chosenTenant.StartWithinHours),
-		))
-
-		// a lot of this logic is broken / needs to be replaced by something saner. But... in another life.
-		if chosenTenant.RecentlyUsedStartEpoch != nil {
-			startEpoch = filabi.ChainEpoch(*chosenTenant.RecentlyUsedStartEpoch)
+		if errors.Is(err, service.ErrTenantsOutOfDatacap) {
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
+				apitypes.ErrTenantsOutOfDatacap,
+				apitypes.ResponseDealRequest{ReplicationStates: replStates},
+				"All selected tenants with claim to %s are out of DataCap 🙀", pCid,
+			)
 		}
-
-		// round the epoch down to a day boundary
-		// we *must* work with startEpoch/StartWithinHours to produce identical retry-deals
-		// 2h +/- because network started at 22:00 UTC
-		rde := ((startEpoch-app.FilDefaultLookback-(filbuiltin.EpochsInHour*filabi.ChainEpoch(chosenTenant.StartWithinHours))-240)/2880)*2880 + 240
-
-		// this is relatively expensive to do within the txn lock
-		// however we cache it and call it exactly once per day, so we should be fine
-		gbpce, err := providerCollateralEstimateGiB(
-			ctx, rde,
-		)
-		if err != nil {
-			return cmn.WrErr(err)
+		if errors.Is(err, service.ErrTooManyReplicas) {
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
+				apitypes.ErrProviderAboveMaxInFlight,
+				apitypes.ResponseDealRequest{ReplicationStates: replStates},
+				"Provider has more proposals in-flight than permitted by selected tenant rules",
+			)
 		}
-
-		encodedLabel, err := filmarket.NewLabelFromString(pCid.String())
-		if err != nil {
-			return cmn.WrErr(err)
+		if errors.Is(err, service.ErrProviderAboveMaxInFlight) {
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
+				apitypes.ErrProviderAboveMaxInFlight,
+				apitypes.ResponseDealRequest{ReplicationStates: replStates},
+				"Provider has more proposals in-flight than permitted by selected tenant rules",
+			)
 		}
-
-		prop := struct {
-			ProposalV0 filmarket.DealProposal `json:"filmarket_proposal"`
-		}{
-			ProposalV0: filmarket.DealProposal{
-				// do not change under any circumstances: even when payments eventually happen, they will happen explicitly out of band
-				// ( a notable exception here would be contract-listener style interactions, but that's way off )
-				StoragePricePerEpoch: filbig.Zero(), // DO NOT CHANGE
-
-				VerifiedDeal: true,
-				PieceCID:     pCid,
-				PieceSize:    filabi.PaddedPieceSize(chosenTenant.PieceSizeBytes),
-
-				Provider: ctxMeta.authedActorID.AsFilAddr(),
-				Client:   chosenTenant.TenantClientID.AsFilAddr(),
-
-				StartEpoch: startEpoch,
-				EndEpoch:   startEpoch + filabi.ChainEpoch(chosenTenant.DealDurationDays)*filbuiltin.EpochsInDay,
-				Label:      encodedLabel,
-
-				ClientCollateral: filbig.Zero(),
-				ProviderCollateral: filbig.Rsh(
-					filbig.Mul(gbpce, filbig.NewInt(chosenTenant.PieceSizeBytes)),
-					30,
-				),
-			},
+		if errors.Is(err, service.ErrReplicationRulesViolation) {
+			return retPayloadAnnotated(c, svc, http.StatusForbidden,
+				apitypes.ErrReplicationRulesViolation,
+				apitypes.ResponseDealRequest{ReplicationStates: replStates},
+				"None of the selected tenants would grant a deal for %s according to their individual rules", pCid,
+			)
 		}
-
-		if _, err := tx.Exec(
-			ctx,
-			`
-			INSERT INTO spd.proposals
-				( proposal_uuid, piece_id, provider_id, client_id, start_epoch, end_epoch, proxied_log2_size, proposal_meta )
-			VALUES ( $1, $2, $3, $4, $5, $6, $7, $8 )
-			`,
-			c.Request().Header.Get("X-SPADE-REQUEST-UUID"), // inherit the request uuid as the proposal uuid (a uuid is a uuid is a uuid)
-			chosenTenant.PieceID,
-			ctxMeta.authedActorID,
-			*chosenTenant.TenantClientID,
-			prop.ProposalV0.StartEpoch,
-			prop.ProposalV0.EndEpoch,
-			bits.TrailingZeros64(uint64(chosenTenant.PieceSizeBytes)),
-			prop,
-		); err != nil {
-			return cmn.WrErr(err)
-		}
-
-		// we managed - bump the counts where applicable and return stats
-		for i := range tenantsEligible {
-			if tenantsEligible[i].IsExclusive && resp.ReplicationStates[i].TenantID != chosenTenant.TenantID {
-				continue
+		if errors.Is(err, service.ErrTenantPolicyMismatch) {
+			if tenantID == 0 && len(replStates) > 0 {
+				tenantID = replStates[0].TenantID
 			}
-
-			resp.ReplicationStates[i].Total++
-			resp.ReplicationStates[i].InOrg++
-			resp.ReplicationStates[i].InCity++
-			resp.ReplicationStates[i].InCountry++
-			resp.ReplicationStates[i].InContinent++
-			resp.ReplicationStates[i].DealAlreadyExists = true
-			resp.ReplicationStates[i].SpInFlightBytes += chosenTenant.PieceSizeBytes
+			return retFail(
+				c,
+				svc,
+				apitypes.ErrInvalidRequest,
+				"Incorrect policy for tenant %d",
+				tenantID,
+			)
 		}
-
-		return retPayloadAnnotated(
-			c,
-			http.StatusOK,
-			0,
-			resp,
-			strings.Join([]string{
-				fmt.Sprintf("Deal queued for PieceCID %s", pCid),
-				``,
-				`In about 5 minutes check the pending list:`,
-				" " + curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/pending_proposals", nil),
-			}, "\n"),
-		)
-	})
-}
-
-var collateralCache, _ = lru.New[filabi.ChainEpoch, filbig.Int](128)
-
-func providerCollateralEstimateGiB(ctx context.Context, sourceEpoch filabi.ChainEpoch) (filbig.Int, error) { //nolint:revive
-	if pc, didFind := collateralCache.Get(sourceEpoch); didFind {
-		return pc, nil
+		return cmn.WrErr(err)
 	}
 
-	collateralGiB, err := app.EpochMinProviderCollateralEstimateGiB(ctx, sourceEpoch)
-	if err != nil {
-		return collateralGiB, cmn.WrErr(err)
-	}
-
-	// make it 1.7 times larger, so that fluctuations in the state won't prevent the deal from being proposed/published later
-	// capped by https://github.com/filecoin-project/lotus/blob/v1.13.2-rc2/markets/storageadapter/provider.go#L267
-	// and https://github.com/filecoin-project/lotus/blob/v1.13.2-rc2/markets/storageadapter/provider.go#L41
-	inflatedCollateralGiB := filbig.Div(
-		filbig.Product(
-			collateralGiB,
-			filbig.NewInt(17),
-		),
-		filbig.NewInt(10),
+	return retPayloadAnnotated(
+		c,
+		svc,
+		http.StatusOK,
+		0,
+		apitypes.ResponseDealRequest{
+			ReplicationStates: replStates,
+		},
+		strings.Join([]string{
+			fmt.Sprintf("Deal queued for PieceCID %s", pCid),
+			``,
+			`In about 5 minutes check the pending list:`,
+			" " + curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/pending_proposals", nil),
+		}, "\n"),
 	)
-
-	collateralCache.Add(sourceEpoch, inflatedCollateralGiB)
-	return inflatedCollateralGiB, nil
 }
