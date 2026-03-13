@@ -7,21 +7,27 @@ import (
 	"strings"
 
 	"code.riba.cloud/go/toolbox/cmn"
-	"github.com/georgysavva/scany/pgxscan"
 	"github.com/labstack/echo/v4"
 	"github.com/storacha/spade/apitypes"
 	"github.com/storacha/spade/internal/app"
+	"github.com/storacha/spade/service"
 )
 
-func apiSpListEligible(c echo.Context) error {
+func NewSpListEligibleHandler(svc service.EligibilityService) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		return apiSpListEligible(c, svc)
+	}
+}
+
+func apiSpListEligible(c echo.Context, svc service.EligibilityService) error {
 	ctx, ctxMeta := unpackAuthedEchoContext(c)
 
-	lim := uint64(listEligibleDefaultSize)
+	lim := uint64(service.ListEligibleDefaultSize)
 	if c.QueryParams().Has("limit") {
 		var err error
-		lim, err = parseUIntQueryParam(c, "limit", 1, listEligibleMaxSize)
+		lim, err = parseUIntQueryParam(c, "limit", 1, service.ListEligibleMaxSize)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 	}
 
@@ -29,40 +35,21 @@ func apiSpListEligible(c echo.Context) error {
 	if c.QueryParams().Has("tenant") {
 		tid, err := parseUIntQueryParam(c, "tenant", 1, 1<<15)
 		if err != nil {
-			return retFail(c, apitypes.ErrInvalidRequest, err.Error())
+			return retFail(c, svc, apitypes.ErrInvalidRequest, err.Error())
 		}
 		tenantID = int16(tid)
 	}
 
-	// how to list: start small, find setting below
-	useQueryFunc := "pieces_eligible_head"
-
-	if c.QueryParams().Has("internal-nolateral") { // secret flag to tune this in flight / figure out optimal values
-		if truthyBoolQueryParam(c, "internal-nolateral") {
-			useQueryFunc = "pieces_eligible_full"
-		}
-	} else if lim > listEligibleDefaultSize { // deduce from requested lim
-		useQueryFunc = "pieces_eligible_full"
-	}
-
-	orderedPieces := make([]*struct {
-		PieceID       int64
-		PieceLog2Size uint8
-		Tenants       []int16 `db:"tenant_ids"`
-		*apitypes.Piece
-	}, 0, lim+1)
-
-	if err := pgxscan.Select(
+	pieces, more, err := svc.EligiblePieces(
 		ctx,
-		ctxMeta.Db[app.DbMain],
-		&orderedPieces,
-		fmt.Sprintf("SELECT * FROM spd.%s( $1, $2, $3, $4, $5 )", useQueryFunc),
 		ctxMeta.authedActorID,
-		lim+1, // ask for one extra, to disambiguate "there is more"
-		tenantID,
-		truthyBoolQueryParam(c, "include-sourceless"),
-		false,
-	); err != nil {
+		service.WithEligiblePiecesLimit(lim),
+		service.WithEligiblePiecesTenantID(tenantID),
+		service.WithEligiblePiecesIncludeSourceless(
+			truthyBoolQueryParam(c, "include-sourceless"),
+		),
+	)
+	if err != nil {
 		return cmn.WrErr(err)
 	}
 
@@ -76,12 +63,10 @@ func apiSpListEligible(c echo.Context) error {
 	}
 
 	// we got more than requested - indicate that this set is large
-	if uint64(len(orderedPieces)) > lim {
-		orderedPieces = orderedPieces[:lim]
-
+	if more {
 		exLim := lim
-		if exLim < listEligibleDefaultSize {
-			exLim = listEligibleDefaultSize
+		if exLim < service.ListEligibleDefaultSize {
+			exLim = service.ListEligibleDefaultSize
 		}
 
 		info = append(
@@ -95,8 +80,8 @@ func apiSpListEligible(c echo.Context) error {
 		)
 	}
 
-	ret := make(apitypes.ResponsePiecesEligible, len(orderedPieces))
-	for i, p := range orderedPieces {
+	ret := make(apitypes.ResponsePiecesEligible, len(pieces))
+	for i, p := range pieces {
 		sa := make(url.Values, 2)
 		sa.Add("call", "reserve_piece")
 		sa.Add("piece_cid", p.PieceCid)
@@ -105,8 +90,8 @@ func apiSpListEligible(c echo.Context) error {
 		p.SampleReserveCmd = curlAuthedForSP(c, ctxMeta.authedActorID, "/sp/invoke", sa)
 		p.ClaimingTenant = p.Tenants[0]
 		p.TenantPolicyCid = app.TEMPPolicies[p.Tenants[0]]
-		ret[i] = p.Piece
+		ret[i] = &p.Piece
 	}
 
-	return retPayloadAnnotated(c, http.StatusOK, 0, ret, strings.Join(info, "\n"))
+	return retPayloadAnnotated(c, svc, http.StatusOK, 0, ret, strings.Join(info, "\n"))
 }
