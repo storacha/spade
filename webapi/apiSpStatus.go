@@ -1,4 +1,4 @@
-package main
+package webapi
 
 import (
 	"github.com/labstack/echo/v4"

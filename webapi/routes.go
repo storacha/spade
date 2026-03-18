@@ -1,4 +1,4 @@
-package main
+package webapi
 
 import (
 	"github.com/labstack/echo/v4"
@@ -6,8 +6,8 @@ import (
 )
 
 // This lists in one place all recognized routes & parameters
-
-func registerRoutes(e *echo.Echo, svc service.SpadeService) {
+// FIXME - we should make an openapi or something for this...
+func RegisterRoutes(e *echo.Echo, svc service.SpadeService) {
 	spRoutes := e.Group("/sp", NewSpIDAuthMiddleware(svc))
 
 	//

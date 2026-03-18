@@ -1,4 +1,4 @@
-package main
+package webapi
 
 import (
 	"fmt"
@@ -61,7 +61,7 @@ func retPayloadAnnotated(c echo.Context, log service.ErrorLogger, httpCode int, 
 		}
 	}
 
-	r := apitypes.ResponseEnvelope{
+	r := apitypes.ResponseEnvelope[apitypes.ResponsePayload]{
 		RequestID:          c.Request().Header.Get("X-SPADE-REQUEST-UUID"),
 		ResponseStateEpoch: int64(ctxMeta.stateEpoch),
 		ResponseTime:       time.Now(),
