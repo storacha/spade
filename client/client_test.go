@@ -145,7 +145,7 @@ func TestClient(t *testing.T) {
 			u := new(bytes.Buffer)
 			err := ut.Execute(u, webapi.TemplateParams{SegPCidV2: segment.String()})
 			require.NoError(t, err)
-			require.Equal(t, u.String(), res.Segments[i].Sources[0])
+			require.Equal(t, apitypes.Source{URL: u.String()}, res.Segments[i].Sources[0])
 		}
 	})
 
