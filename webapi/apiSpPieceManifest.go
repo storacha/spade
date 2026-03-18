@@ -82,7 +82,17 @@ func apiSpPieceManifest(c echo.Context, svc service.PieceManifestService) error 
 			return cmn.WrErr(err)
 		}
 		resp.Segments[i].PCidV2 = s.String()
-		resp.Segments[i].Sources = []string{u.String()}
+		// TODO: at this point we need to get HTTP headers to include for each
+		// segment. We should be able to lookup piece -> node DID+URL and obtain a
+		// delegation from them, allowing transfer of the blobs. We then create a
+		// blob/retrieve invocation for each segment, and include the resulting
+		// URL+headers here. For now we just include the URL without any auth,
+		// which works for the public network but not the private one.
+		//
+		// The following issues will address this TODO:
+		// * https://github.com/storacha/spade/issues/16
+		// * https://github.com/storacha/spade/issues/17
+		resp.Segments[i].Sources = []apitypes.Source{{URL: u.String()}}
 	}
 
 	return retPayloadAnnotated(

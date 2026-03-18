@@ -104,7 +104,7 @@ var pieceManifestCmd = &ufcli.Command{
 				return cmn.WrErr(err)
 			}
 			resp.Segments[i].PCidV2 = pcs[i].SegPCidV2
-			resp.Segments[i].Sources = []string{u.String()}
+			resp.Segments[i].Sources = []apitypes.Source{{URL: u.String()}}
 		}
 
 		jb, err := json.MarshalIndent(resp, "", "  ")

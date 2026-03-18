@@ -7,7 +7,11 @@ type ResponsePieceManifestFR58 struct {
 }
 type Segment struct {
 	PCidV2  string   `json:"pcid_v2"`
-	Sources []string `json:"sources"`
+	Sources []Source `json:"sources"`
+}
+type Source struct {
+	URL     string              `json:"url"`
+	Headers map[string][]string `json:"headers,omitempty"`
 }
 
 func (ResponsePieceManifestFR58) is() isResponsePayload { return isResponsePayload{} }
